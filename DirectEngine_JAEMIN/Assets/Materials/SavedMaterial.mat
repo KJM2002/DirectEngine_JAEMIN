@@ -1,0 +1,10 @@
+material_name=SavedMaterial
+vertex_shader=Shaders/BasicVertex.hlsl
+pixel_shader=Shaders/BasicPixel.hlsl
+base_color=1,1,1,1
+roughness=0.5
+metallic=0
+base_texture=Assets/Textures/metal.png
+roughness_texture=
+metallic_texture=
+normal_texture=

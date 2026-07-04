@@ -1,0 +1,14 @@
+[Collider]
+type=AABB
+center=-1.15,1,-1
+size=0.45,1.85,1.9
+radius=0.5
+is_trigger=false
+
+[Collider]
+type=AABB
+center=1.15,0.9,-1
+size=0.45,1.8,2
+radius=0.5
+is_trigger=false
+
