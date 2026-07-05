@@ -61,4 +61,34 @@ namespace Engine::Editor
     float PreviewCamera::GetPitch() const { return m_pitch; }
     float PreviewCamera::GetDistance() const { return m_distance; }
     const Math::Vector3& PreviewCamera::GetTarget() const { return m_target; }
+
+    Math::Matrix PreviewCamera::GetViewMatrix() const
+    {
+        const float yaw = m_yaw * 0.017453292f;
+        const float pitch = m_pitch * 0.017453292f;
+        const float cp = std::cos(pitch);
+        const Math::Vector3 offset =
+        {
+            std::sin(yaw) * cp * m_distance,
+            std::sin(pitch) * m_distance,
+            std::cos(yaw) * cp * m_distance
+        };
+        const Math::Vector3 position =
+        {
+            m_target.x + offset.x,
+            m_target.y + offset.y,
+            m_target.z + offset.z
+        };
+
+        return DirectX::XMMatrixLookAtLH(
+            DirectX::XMLoadFloat3(&position),
+            DirectX::XMLoadFloat3(&m_target),
+            DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f));
+    }
+
+    Math::Matrix PreviewCamera::GetProjectionMatrix() const
+    {
+        const float aspect = m_viewportHeight <= 0.0f ? 1.0f : m_viewportWidth / m_viewportHeight;
+        return DirectX::XMMatrixPerspectiveFovLH(DirectX::XMConvertToRadians(45.0f), aspect, 0.01f, 5000.0f);
+    }
 }

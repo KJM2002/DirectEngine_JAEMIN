@@ -154,7 +154,9 @@
     <ClCompile Include="Engine\Editor\Command\DeleteGameObjectCommand.cpp" />
     <ClCompile Include="Engine\Editor\Command\DuplicateGameObjectCommand.cpp" />
     <ClCompile Include="Engine\Editor\Command\GameObjectSnapshot.cpp" />
+    <ClCompile Include="Engine\Editor\Command\InspectorEditCommand.cpp" />
     <ClCompile Include="Engine\Editor\Command\RenameGameObjectCommand.cpp" />
+    <ClCompile Include="Engine\Editor\Command\SetObjectFolderCommand.cpp" />
     <ClCompile Include="Engine\Editor\Command\TransformCommand.cpp" />
     <ClCompile Include="Engine\Editor\EditorCamera.cpp" />
     <ClCompile Include="Engine\Editor\EditorDirtyManager.cpp" />
@@ -236,7 +238,9 @@
     <ClInclude Include="Engine\Editor\Command\DuplicateGameObjectCommand.h" />
     <ClInclude Include="Engine\Editor\Command\GameObjectSnapshot.h" />
     <ClInclude Include="Engine\Editor\Command\ICommand.h" />
+    <ClInclude Include="Engine\Editor\Command\InspectorEditCommand.h" />
     <ClInclude Include="Engine\Editor\Command\RenameGameObjectCommand.h" />
+    <ClInclude Include="Engine\Editor\Command\SetObjectFolderCommand.h" />
     <ClInclude Include="Engine\Editor\Command\TransformCommand.h" />
     <ClInclude Include="Engine\Editor\EditorCamera.h" />
     <ClInclude Include="Engine\Editor\EditorDirtyManager.h" />

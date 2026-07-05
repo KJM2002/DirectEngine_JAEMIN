@@ -19,6 +19,7 @@ namespace Engine::Graphics::D3D11
         RHI::TextureFormat GetFormat() const override;
         std::uint32_t GetWidth() const override;
         std::uint32_t GetHeight() const override;
+        void* GetNativeShaderResourceHandleForUI() const override;
 
         ID3D11ShaderResourceView* GetShaderResourceView() const;
         ID3D11SamplerState* GetSamplerState() const;

@@ -3,8 +3,8 @@ outliner_folder=StaticMesh
 
 [Camera]
 name=MainCamera
-position=8.34262,3.29418,-5.25322
-rotation=18.0481,-39.1901,0
+position=9.31368,6.36695,-9.471
+rotation=24.7517,-30.252,0
 fov=60
 near=0.1
 far=100

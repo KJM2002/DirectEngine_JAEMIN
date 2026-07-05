@@ -16,6 +16,8 @@ namespace Engine::Editor
         float GetPitch() const;
         float GetDistance() const;
         const Math::Vector3& GetTarget() const;
+        Math::Matrix GetViewMatrix() const;
+        Math::Matrix GetProjectionMatrix() const;
 
     private:
         Math::Vector3 m_target = { 0.0f, 0.0f, 0.0f };

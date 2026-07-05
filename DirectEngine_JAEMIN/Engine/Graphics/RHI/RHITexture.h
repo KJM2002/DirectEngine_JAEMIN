@@ -15,5 +15,6 @@ namespace Engine::RHI
         virtual TextureFormat GetFormat() const = 0;
         virtual std::uint32_t GetWidth() const = 0;
         virtual std::uint32_t GetHeight() const = 0;
+        virtual void* GetNativeShaderResourceHandleForUI() const { return nullptr; }
     };
 }

@@ -30,6 +30,18 @@ namespace Engine::Editor
         std::wstring materialPath;
         std::string meshGuid;
         std::string materialGuid;
+        bool hasMaterialState = false;
+        Math::Vector4 materialBaseColor = { 1.0f, 1.0f, 1.0f, 1.0f };
+        float materialRoughness = 0.5f;
+        float materialMetallic = 0.0f;
+        std::shared_ptr<RHI::RHITexture> baseColorTexture;
+        std::shared_ptr<RHI::RHITexture> roughnessTexture;
+        std::shared_ptr<RHI::RHITexture> metallicTexture;
+        std::shared_ptr<RHI::RHITexture> normalTexture;
+        std::wstring baseColorTexturePath;
+        std::wstring roughnessTexturePath;
+        std::wstring metallicTexturePath;
+        std::wstring normalTexturePath;
         bool cloneMaterialOnRestore = false;
     };
 
@@ -37,6 +49,7 @@ namespace Engine::Editor
     {
         Physics::ColliderType type = Physics::ColliderType::AABB;
         Math::Vector3 center = { 0.0f, 0.0f, 0.0f };
+        Math::Vector3 rotation = { 0.0f, 0.0f, 0.0f };
         Math::Vector3 size = { 1.0f, 1.0f, 1.0f };
         float radius = 0.5f;
         bool isTrigger = false;
@@ -87,6 +100,7 @@ namespace Engine::Editor
     struct GameObjectSnapshot
     {
         std::string name = "GameObject";
+        std::string outlinerFolder;
         Math::Transform transform;
         MeshRendererSnapshot meshRenderer;
         std::vector<ColliderSnapshot> colliders;
@@ -95,6 +109,8 @@ namespace Engine::Editor
         PlayerStartSnapshot playerStart;
 
         static GameObjectSnapshot Capture(const Scene::GameObject& object);
+        static bool IsDifferent(const GameObjectSnapshot& a, const GameObjectSnapshot& b, float epsilon = 0.0001f);
+        void ApplyTo(Scene::GameObject& object) const;
         Scene::GameObject& Restore(Scene::Scene& scene) const;
     };
 }

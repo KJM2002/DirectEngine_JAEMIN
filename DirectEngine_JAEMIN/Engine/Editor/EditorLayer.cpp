@@ -7,7 +7,9 @@
 #include "Engine/Editor/Command/DeleteGameObjectCommand.h"
 #include "Engine/Editor/Command/DuplicateGameObjectCommand.h"
 #include "Engine/Editor/Command/GameObjectSnapshot.h"
+#include "Engine/Editor/Command/InspectorEditCommand.h"
 #include "Engine/Editor/Command/RenameGameObjectCommand.h"
+#include "Engine/Editor/Command/SetObjectFolderCommand.h"
 #include "Engine/Editor/Command/TransformCommand.h"
 #include "Engine/Input/Input.h"
 #include "Engine/Graphics/Renderer/Renderer.h"
@@ -463,6 +465,138 @@ namespace Engine::Editor
             return true;
         }
 
+        float Dot(const Math::Vector3& a, const Math::Vector3& b)
+        {
+            return a.x * b.x + a.y * b.y + a.z * b.z;
+        }
+
+        Math::Vector3 Cross(const Math::Vector3& a, const Math::Vector3& b)
+        {
+            Math::Vector3 result;
+            DirectX::XMStoreFloat3(&result, DirectX::XMVector3Cross(DirectX::XMLoadFloat3(&a), DirectX::XMLoadFloat3(&b)));
+            return result;
+        }
+
+        bool NormalizeSafe(const Math::Vector3& value, Math::Vector3& outNormalized)
+        {
+            const DirectX::XMVECTOR vector = DirectX::XMLoadFloat3(&value);
+            const float lengthSq = DirectX::XMVectorGetX(DirectX::XMVector3LengthSq(vector));
+            if (lengthSq < 0.000001f)
+            {
+                return false;
+            }
+
+            DirectX::XMStoreFloat3(&outNormalized, DirectX::XMVector3Normalize(vector));
+            return std::isfinite(outNormalized.x) && std::isfinite(outNormalized.y) && std::isfinite(outNormalized.z);
+        }
+
+        bool IntersectRayPlane(const Physics::Ray& ray, const Math::Vector3& planePoint, const Math::Vector3& planeNormal, Math::Vector3& outPoint)
+        {
+            Math::Vector3 normal;
+            if (!NormalizeSafe(planeNormal, normal))
+            {
+                return false;
+            }
+
+            const float denominator = Dot(ray.direction, normal);
+            if (std::abs(denominator) < 0.0001f)
+            {
+                return false;
+            }
+
+            const Math::Vector3 delta =
+            {
+                planePoint.x - ray.origin.x,
+                planePoint.y - ray.origin.y,
+                planePoint.z - ray.origin.z
+            };
+            const float t = Dot(delta, normal) / denominator;
+            if (t < 0.0f || !std::isfinite(t))
+            {
+                return false;
+            }
+
+            outPoint =
+            {
+                ray.origin.x + ray.direction.x * t,
+                ray.origin.y + ray.direction.y * t,
+                ray.origin.z + ray.direction.z * t
+            };
+            return std::isfinite(outPoint.x) && std::isfinite(outPoint.y) && std::isfinite(outPoint.z);
+        }
+
+        float Distance(const Math::Vector3& a, const Math::Vector3& b)
+        {
+            const float x = a.x - b.x;
+            const float y = a.y - b.y;
+            const float z = a.z - b.z;
+            return std::sqrt(x * x + y * y + z * z);
+        }
+
+        float GetGizmoRadiusForCamera(const Scene::Camera& camera, const Math::Vector3& center)
+        {
+            const float distance = Distance(camera.position, center);
+            return std::clamp(distance * 0.18f, 0.35f, 20.0f);
+        }
+
+        bool IsFiniteRotation(const Math::Vector3& rotation)
+        {
+            return std::isfinite(rotation.x) && std::isfinite(rotation.y) && std::isfinite(rotation.z);
+        }
+
+        bool GetScreenCircleAngle(float centerX, float centerY, float mouseX, float mouseY, float& outAngle)
+        {
+            const float x = mouseX - centerX;
+            const float y = mouseY - centerY;
+            if ((x * x + y * y) < 9.0f)
+            {
+                return false;
+            }
+
+            outAngle = std::atan2(y, x);
+            return std::isfinite(outAngle);
+        }
+
+        float NormalizeSignedAngle(float angle)
+        {
+            while (angle > DirectX::XM_PI)
+            {
+                angle -= DirectX::XM_2PI;
+            }
+            while (angle < -DirectX::XM_PI)
+            {
+                angle += DirectX::XM_2PI;
+            }
+            return angle;
+        }
+
+        Math::Vector3 QuaternionToPitchYawRoll(DirectX::FXMVECTOR quaternion)
+        {
+            DirectX::XMFLOAT4 q;
+            DirectX::XMStoreFloat4(&q, DirectX::XMQuaternionNormalize(quaternion));
+
+            const float pitchSin = std::clamp(2.0f * (q.w * q.x - q.y * q.z), -1.0f, 1.0f);
+            Math::Vector3 result;
+            result.x = std::asin(pitchSin);
+            result.y = std::atan2(2.0f * (q.w * q.y + q.z * q.x), 1.0f - 2.0f * (q.x * q.x + q.y * q.y));
+            result.z = std::atan2(2.0f * (q.w * q.z + q.x * q.y), 1.0f - 2.0f * (q.x * q.x + q.z * q.z));
+            return result;
+        }
+
+        Math::Vector3 ApplyRotationAroundDisplayedRing(const Math::Vector3& startEuler, const Math::Vector3& ringAxis, float deltaAngle)
+        {
+            Math::Vector3 normalizedAxis;
+            if (!NormalizeSafe(ringAxis, normalizedAxis) || !std::isfinite(deltaAngle))
+            {
+                return startEuler;
+            }
+
+            const DirectX::XMMATRIX startRotation = DirectX::XMMatrixRotationRollPitchYaw(startEuler.x, startEuler.y, startEuler.z);
+            const DirectX::XMMATRIX deltaRotation = DirectX::XMMatrixRotationAxis(DirectX::XMLoadFloat3(&normalizedAxis), deltaAngle);
+            const DirectX::XMMATRIX combinedRotation = startRotation * deltaRotation;
+            return QuaternionToPitchYawRoll(DirectX::XMQuaternionRotationMatrix(combinedRotation));
+        }
+
         bool DragAndInputFloat(const char* label, float* value, float speed, float minValue = 0.0f, float maxValue = 0.0f, const char* format = "%.3f")
         {
             bool changed = ImGui::DragFloat(label, value, speed, minValue, maxValue, format);
@@ -866,18 +1000,35 @@ namespace Engine::Editor
             return;
         }
 
+        const bool altPressed = input.GetKeyRaw(Input::KeyAlt) || io.KeyAlt;
+        const bool rightMouseHeld = input.GetMouseButtonRaw(Input::MouseButtonRight);
+        if (!io.WantTextInput && !controlPressed && !shiftPressed && !altPressed && !rightMouseHeld)
+        {
+            if (input.GetKeyDown(Input::KeyW))
+            {
+                m_gizmoMode = GizmoMode::Move;
+            }
+            else if (input.GetKeyDown(Input::KeyR))
+            {
+                m_gizmoMode = GizmoMode::Rotate;
+            }
+            else if (input.GetKeyDown(Input::KeyS))
+            {
+                m_gizmoMode = GizmoMode::Scale;
+            }
+        }
+
         if (!mouseOverEditorUi && m_showGizmoTools && m_selectedObject && input.GetMouseButtonDownRaw(Input::MouseButtonLeft) && scene.GetActiveCamera())
         {
             m_activeGizmoAxis = PickGizmoAxis(*scene.GetActiveCamera(), input.GetMouseX(), input.GetMouseY(), io.DisplaySize.x, io.DisplaySize.y);
             if (m_activeGizmoAxis != GizmoAxis::None)
             {
-                const bool altPressed = input.GetKeyRaw(Input::KeyAlt) || io.KeyAlt;
                 if (altPressed)
                 {
                     DuplicateSelectedObject(scene);
                 }
 
-                BeginGizmoDrag();
+                BeginGizmoDrag(*scene.GetActiveCamera(), input, io.DisplaySize.x, io.DisplaySize.y);
                 return;
             }
         }
@@ -1068,6 +1219,9 @@ namespace Engine::Editor
         {
             ImGui::Text("Scene: %s", scene.GetDirtyDisplayName().c_str());
             ImGui::SameLine();
+            const char* gizmoModeText = m_gizmoMode == GizmoMode::Move ? "Move(W)" : (m_gizmoMode == GizmoMode::Rotate ? "Rotate(R)" : "Scale(S)");
+            ImGui::Text("Gizmo %s", gizmoModeText);
+            ImGui::SameLine();
             ImGui::TextUnformatted("Perspective");
             ImGui::SameLine();
             ImGui::TextUnformatted("Lit");
@@ -1081,16 +1235,86 @@ namespace Engine::Editor
         ImGui::SetNextWindowPos(ImVec2(rightPanelX, sideTop), ImGuiCond_Always);
         ImGui::SetNextWindowSize(ImVec2(rightPanelWidth, hierarchyHeight), ImGuiCond_Always);
         ImGui::Begin("Outliner", nullptr, fixedPanelFlags);
-        if (m_selectedObject && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && ImGui::IsKeyPressed(ImGuiKey_F2))
+        if (ImGui::Button("+ Folder"))
         {
-            BeginRenameSelected();
+            CreateOutlinerFolder(scene);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Move To Root") && !m_selectedObjects.empty())
+        {
+            MoveObjectsToFolder(scene, m_selectedObjects, {});
         }
 
+        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && ImGui::IsKeyPressed(ImGuiKey_F2))
+        {
+            if (m_selectedObject)
+            {
+                BeginRenameSelected();
+            }
+            else if (!m_selectedOutlinerFolder.empty())
+            {
+                BeginRenameSelectedFolder();
+            }
+        }
+
+        std::vector<Scene::GameObject*> outlinerObjectOrder;
+        outlinerObjectOrder.reserve(scene.GetGameObjects().size());
         for (const std::unique_ptr<Scene::GameObject>& object : scene.GetGameObjects())
         {
-            const bool selected = IsObjectSelected(object.get());
-            ImGui::PushID(object.get());
-            if (m_renamingObject == object.get())
+            if (object->GetOutlinerFolder().empty())
+            {
+                outlinerObjectOrder.push_back(object.get());
+            }
+        }
+        const std::vector<std::string> folders = scene.GetOutlinerFolders();
+        for (const std::string& folder : folders)
+        {
+            for (const std::unique_ptr<Scene::GameObject>& object : scene.GetGameObjects())
+            {
+                if (object->GetOutlinerFolder() == folder)
+                {
+                    outlinerObjectOrder.push_back(object.get());
+                }
+            }
+        }
+
+        auto selectOutlinerRange = [&](Scene::GameObject* object)
+        {
+            if (!object)
+            {
+                return;
+            }
+
+            auto targetIt = std::find(outlinerObjectOrder.begin(), outlinerObjectOrder.end(), object);
+            auto anchorIt = std::find(outlinerObjectOrder.begin(), outlinerObjectOrder.end(), m_outlinerSelectionAnchor);
+            if (targetIt == outlinerObjectOrder.end() || anchorIt == outlinerObjectOrder.end())
+            {
+                SetSingleSelectedObject(object);
+                m_outlinerSelectionAnchor = object;
+                return;
+            }
+
+            const std::size_t targetIndex = static_cast<std::size_t>(std::distance(outlinerObjectOrder.begin(), targetIt));
+            const std::size_t anchorIndex = static_cast<std::size_t>(std::distance(outlinerObjectOrder.begin(), anchorIt));
+            const std::size_t first = std::min(anchorIndex, targetIndex);
+            const std::size_t last = std::max(anchorIndex, targetIndex);
+
+            m_selectedObjects.clear();
+            for (std::size_t index = first; index <= last && index < outlinerObjectOrder.size(); ++index)
+            {
+                if (outlinerObjectOrder[index])
+                {
+                    m_selectedObjects.push_back(outlinerObjectOrder[index]);
+                }
+            }
+            m_selectedObject = object;
+        };
+
+        auto drawObjectRow = [&](Scene::GameObject& object)
+        {
+            const bool selected = IsObjectSelected(&object);
+            ImGui::PushID(&object);
+            if (m_renamingObject == &object)
             {
                 if (m_focusRenameInput)
                 {
@@ -1119,18 +1343,159 @@ namespace Engine::Editor
                     m_focusRenameInput = false;
                 }
             }
-            else if (ImGui::Selectable(object->GetName().c_str(), selected))
+            else if (ImGui::Selectable(object.GetName().c_str(), selected))
             {
-                if (ImGui::GetIO().KeyShift)
+                m_selectedOutlinerFolder.clear();
+                const ImGuiIO& rowIo = ImGui::GetIO();
+                if (rowIo.KeyShift)
                 {
-                    ToggleSelectedObject(object.get());
+                    selectOutlinerRange(&object);
+                }
+                else if (rowIo.KeyCtrl)
+                {
+                    ToggleSelectedObject(&object);
+                    m_outlinerSelectionAnchor = &object;
                 }
                 else
                 {
-                    SetSingleSelectedObject(object.get());
+                    SetSingleSelectedObject(&object);
+                    m_outlinerSelectionAnchor = &object;
+                }
+            }
+
+            if (ImGui::BeginPopupContextItem("ObjectContext"))
+            {
+                std::vector<Scene::GameObject*> targets;
+                if (IsObjectSelected(&object) && !m_selectedObjects.empty())
+                {
+                    targets = m_selectedObjects;
+                }
+                else
+                {
+                    targets.push_back(&object);
+                }
+
+                if (ImGui::MenuItem("Move To Root"))
+                {
+                    MoveObjectsToFolder(scene, targets, {});
+                }
+                if (ImGui::BeginMenu("Move To Folder"))
+                {
+                    for (const std::string& folder : scene.GetOutlinerFolders())
+                    {
+                        if (ImGui::MenuItem(folder.c_str()))
+                        {
+                            MoveObjectsToFolder(scene, targets, folder);
+                        }
+                    }
+                    ImGui::EndMenu();
+                }
+                ImGui::EndPopup();
+            }
+            ImGui::PopID();
+        };
+
+        auto drawFolder = [&](const std::string& folder)
+        {
+            ImGui::PushID(folder.c_str());
+            const bool selected = !folder.empty() && m_selectedOutlinerFolder == folder && !m_selectedObject;
+            if (m_renamingOutlinerFolder == folder)
+            {
+                if (m_focusFolderRenameInput)
+                {
+                    ImGui::SetKeyboardFocusHere();
+                    m_focusFolderRenameInput = false;
+                }
+
+                const bool enterPressed = ImGui::InputText("##FolderName", m_folderRenameBuffer.data(), m_folderRenameBuffer.size(), ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+                const bool escapePressed = ImGui::IsKeyPressed(ImGuiKey_Escape);
+                if (enterPressed)
+                {
+                    CommitFolderRename(scene);
+                }
+                else if (escapePressed)
+                {
+                    m_renamingOutlinerFolder.clear();
+                    m_focusFolderRenameInput = false;
+                }
+                else if (ImGui::IsItemDeactivatedAfterEdit())
+                {
+                    CommitFolderRename(scene);
+                }
+                else if (ImGui::IsItemDeactivated())
+                {
+                    m_renamingOutlinerFolder.clear();
+                    m_focusFolderRenameInput = false;
+                }
+            }
+            else
+            {
+                const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow
+                    | ImGuiTreeNodeFlags_DefaultOpen
+                    | (selected ? ImGuiTreeNodeFlags_Selected : 0);
+                const bool open = ImGui::TreeNodeEx(folder.c_str(), flags);
+                if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
+                {
+                    m_selectedOutlinerFolder = folder;
+                    SetSingleSelectedObject(nullptr);
+                    m_outlinerSelectionAnchor = nullptr;
+                }
+                if (ImGui::BeginPopupContextItem("FolderContext"))
+                {
+                    const bool hasSelection = !m_selectedObjects.empty();
+                    if (ImGui::MenuItem("Move Selection Here", nullptr, false, hasSelection))
+                    {
+                        MoveObjectsToFolder(scene, m_selectedObjects, folder);
+                    }
+                    if (ImGui::MenuItem("Rename Folder"))
+                    {
+                        m_selectedOutlinerFolder = folder;
+                        SetSingleSelectedObject(nullptr);
+                        m_outlinerSelectionAnchor = nullptr;
+                        BeginRenameSelectedFolder();
+                    }
+                    if (ImGui::MenuItem("Delete Folder"))
+                    {
+                        scene.RemoveOutlinerFolder(folder);
+                        scene.MarkDirty();
+                        if (m_selectedOutlinerFolder == folder)
+                        {
+                            m_selectedOutlinerFolder.clear();
+                        }
+                    }
+                    ImGui::EndPopup();
+                }
+
+                if (open)
+                {
+                    for (const std::unique_ptr<Scene::GameObject>& object : scene.GetGameObjects())
+                    {
+                        if (object->GetOutlinerFolder() == folder)
+                        {
+                            drawObjectRow(*object);
+                        }
+                    }
+                    ImGui::TreePop();
                 }
             }
             ImGui::PopID();
+        };
+
+        if (ImGui::TreeNodeEx("Scene Root", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_OpenOnArrow))
+        {
+            for (const std::unique_ptr<Scene::GameObject>& object : scene.GetGameObjects())
+            {
+                if (object->GetOutlinerFolder().empty())
+                {
+                    drawObjectRow(*object);
+                }
+            }
+            ImGui::TreePop();
+        }
+
+        for (const std::string& folder : folders)
+        {
+            drawFolder(folder);
         }
         ImGui::End();
 
@@ -1179,6 +1544,7 @@ namespace Engine::Editor
                 m_inspectorTransformObject = nullptr;
             }
 
+            bool inspectorEditChanged = false;
             if (Scene::MeshRendererComponent* meshRenderer = m_selectedObject->GetComponent<Scene::MeshRendererComponent>())
             {
                 ImGui::SeparatorText("Mesh Renderer");
@@ -1191,7 +1557,7 @@ namespace Engine::Editor
                     if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_TEXTURE"))
                     {
                         const std::wstring texturePath(static_cast<const wchar_t*>(payload->Data));
-                        ApplyTextureToSelectedMaterial(renderer, texturePath);
+                        inspectorEditChanged = ApplyTextureToSelectedMaterial(renderer, texturePath) || inspectorEditChanged;
                     }
                     ImGui::EndDragDropTarget();
                 }
@@ -1202,17 +1568,18 @@ namespace Engine::Editor
                     if (ImGui::ColorEdit4("Base Color", &baseColor.x))
                     {
                         material->SetBaseColor(baseColor);
+                        inspectorEditChanged = true;
                     }
 
                     float roughness = material->GetRoughness();
-                    SliderAndInputFloat("Roughness", &roughness, 0.0f, 1.0f);
+                    inspectorEditChanged = SliderAndInputFloat("Roughness", &roughness, 0.0f, 1.0f) || inspectorEditChanged;
                     if (roughness != material->GetRoughness())
                     {
                         material->SetRoughness(roughness);
                     }
 
                     float metallic = material->GetMetallic();
-                    SliderAndInputFloat("Metallic", &metallic, 0.0f, 1.0f);
+                    inspectorEditChanged = SliderAndInputFloat("Metallic", &metallic, 0.0f, 1.0f) || inspectorEditChanged;
                     if (metallic != material->GetMetallic())
                     {
                         material->SetMetallic(metallic);
@@ -1232,14 +1599,14 @@ namespace Engine::Editor
                             if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_TEXTURE"))
                             {
                                 const std::wstring texturePath(static_cast<const wchar_t*>(payload->Data));
-                                ApplyTextureToSelectedMaterial(renderer, texturePath, slot);
+                                inspectorEditChanged = ApplyTextureToSelectedMaterial(renderer, texturePath, slot) || inspectorEditChanged;
                             }
                             ImGui::EndDragDropTarget();
                         }
                         ImGui::SameLine();
                         if (ImGui::Button("Clear", ImVec2(60.0f, 0.0f)))
                         {
-                            ClearSelectedMaterialTextureSlot(slot);
+                            inspectorEditChanged = ClearSelectedMaterialTextureSlot(slot) || inspectorEditChanged;
                         }
                         ImGui::PopID();
                     };
@@ -1276,14 +1643,15 @@ namespace Engine::Editor
                 if (ImGui::Combo("Type", &currentType, items, IM_ARRAYSIZE(items)))
                 {
                     light->type = static_cast<Scene::LightType>(currentType);
+                    inspectorEditChanged = true;
                 }
 
-                ImGui::ColorEdit3("Color", &light->color.x);
-                DragAndInputFloat("Intensity", &light->intensity, 0.05f, 0.0f, 100.0f);
-                DragAndInputFloat("Range", &light->range, 0.05f, 0.01f, 1000.0f);
-                DragAndInputFloat3("Direction", &light->direction.x, 0.05f, -1.0f, 1.0f);
-                DragAndInputFloat("Inner Cone", &light->innerConeAngle, 0.25f, 0.0f, 179.0f);
-                DragAndInputFloat("Outer Cone", &light->outerConeAngle, 0.25f, 0.0f, 179.0f);
+                inspectorEditChanged = ImGui::ColorEdit3("Color", &light->color.x) || inspectorEditChanged;
+                inspectorEditChanged = DragAndInputFloat("Intensity", &light->intensity, 0.05f, 0.0f, 100.0f) || inspectorEditChanged;
+                inspectorEditChanged = DragAndInputFloat("Range", &light->range, 0.05f, 0.01f, 1000.0f) || inspectorEditChanged;
+                inspectorEditChanged = DragAndInputFloat3("Direction", &light->direction.x, 0.05f, -1.0f, 1.0f) || inspectorEditChanged;
+                inspectorEditChanged = DragAndInputFloat("Inner Cone", &light->innerConeAngle, 0.25f, 0.0f, 179.0f) || inspectorEditChanged;
+                inspectorEditChanged = DragAndInputFloat("Outer Cone", &light->outerConeAngle, 0.25f, 0.0f, 179.0f) || inspectorEditChanged;
                 light->intensity = std::clamp(light->intensity, 0.0f, 100.0f);
                 light->range = std::clamp(light->range, 0.01f, 1000.0f);
                 light->direction.x = std::clamp(light->direction.x, -1.0f, 1.0f);
@@ -1303,53 +1671,71 @@ namespace Engine::Editor
                 if (ImGui::Combo("Collider Type", &currentType, items, IM_ARRAYSIZE(items)))
                 {
                     collider->type = currentType == 1 ? Physics::ColliderType::Sphere : Physics::ColliderType::AABB;
+                    inspectorEditChanged = true;
                 }
-                DragAndInputFloat3("Center", &collider->center.x, 0.05f);
-                DragAndInputFloat3("Size", &collider->size.x, 0.05f, 0.01f, 1000.0f);
-                DragAndInputFloat("Radius", &collider->radius, 0.05f, 0.01f, 1000.0f);
+                inspectorEditChanged = DragAndInputFloat3("Center", &collider->center.x, 0.05f) || inspectorEditChanged;
+                Math::Vector3 colliderRotationDegrees =
+                {
+                    DirectX::XMConvertToDegrees(collider->rotation.x),
+                    DirectX::XMConvertToDegrees(collider->rotation.y),
+                    DirectX::XMConvertToDegrees(collider->rotation.z)
+                };
+                if (DragAndInputFloat3("Rotation (deg)", &colliderRotationDegrees.x, 1.0f))
+                {
+                    collider->rotation =
+                    {
+                        DirectX::XMConvertToRadians(colliderRotationDegrees.x),
+                        DirectX::XMConvertToRadians(colliderRotationDegrees.y),
+                        DirectX::XMConvertToRadians(colliderRotationDegrees.z)
+                    };
+                    inspectorEditChanged = true;
+                }
+                inspectorEditChanged = DragAndInputFloat3("Size", &collider->size.x, 0.05f, 0.01f, 1000.0f) || inspectorEditChanged;
+                inspectorEditChanged = DragAndInputFloat("Radius", &collider->radius, 0.05f, 0.01f, 1000.0f) || inspectorEditChanged;
                 collider->size.x = std::clamp(collider->size.x, 0.01f, 1000.0f);
                 collider->size.y = std::clamp(collider->size.y, 0.01f, 1000.0f);
                 collider->size.z = std::clamp(collider->size.z, 0.01f, 1000.0f);
                 collider->radius = std::clamp(collider->radius, 0.01f, 1000.0f);
-                ImGui::Checkbox("Is Trigger", &collider->isTrigger);
+                inspectorEditChanged = ImGui::Checkbox("Is Trigger", &collider->isTrigger) || inspectorEditChanged;
                 ImGui::Text("Current: %s", ToColliderTypeName(collider->type));
             }
 
             if (Scene::PostProcessComponent* postProcess = m_selectedObject->GetComponent<Scene::PostProcessComponent>())
             {
                 ImGui::SeparatorText("Post Process");
-                ImGui::Checkbox("Enabled", &postProcess->enabled);
+                inspectorEditChanged = ImGui::Checkbox("Enabled", &postProcess->enabled) || inspectorEditChanged;
                 if (postProcess->effect != Renderer::PostProcessEffect::None)
                 {
                     postProcess->grayscaleEnabled = postProcess->grayscaleEnabled || postProcess->effect == Renderer::PostProcessEffect::Grayscale;
                     postProcess->vignetteEnabled = postProcess->vignetteEnabled || postProcess->effect == Renderer::PostProcessEffect::Vignette;
                     postProcess->toneMappingEnabled = postProcess->toneMappingEnabled || postProcess->effect == Renderer::PostProcessEffect::ToneMapping;
                     postProcess->effect = Renderer::PostProcessEffect::None;
+                    inspectorEditChanged = true;
                 }
-                ImGui::Checkbox("Grayscale", &postProcess->grayscaleEnabled);
+                inspectorEditChanged = ImGui::Checkbox("Grayscale", &postProcess->grayscaleEnabled) || inspectorEditChanged;
                 if (postProcess->grayscaleEnabled)
                 {
-                    SliderAndInputFloat("Grayscale Intensity", &postProcess->grayscaleIntensity, 0.0f, 1.0f);
+                    inspectorEditChanged = SliderAndInputFloat("Grayscale Intensity", &postProcess->grayscaleIntensity, 0.0f, 1.0f) || inspectorEditChanged;
                 }
-                ImGui::Checkbox("Vignette", &postProcess->vignetteEnabled);
+                inspectorEditChanged = ImGui::Checkbox("Vignette", &postProcess->vignetteEnabled) || inspectorEditChanged;
                 if (postProcess->vignetteEnabled)
                 {
-                    SliderAndInputFloat("Vignette Strength", &postProcess->vignetteStrength, 0.0f, 2.0f);
-                    SliderAndInputFloat("Vignette Radius", &postProcess->vignetteRadius, 0.0f, 2.0f);
-                    SliderAndInputFloat("Vignette Softness", &postProcess->vignetteSoftness, 0.01f, 2.0f);
+                    inspectorEditChanged = SliderAndInputFloat("Vignette Strength", &postProcess->vignetteStrength, 0.0f, 2.0f) || inspectorEditChanged;
+                    inspectorEditChanged = SliderAndInputFloat("Vignette Radius", &postProcess->vignetteRadius, 0.0f, 2.0f) || inspectorEditChanged;
+                    inspectorEditChanged = SliderAndInputFloat("Vignette Softness", &postProcess->vignetteSoftness, 0.01f, 2.0f) || inspectorEditChanged;
                 }
-                ImGui::Checkbox("Tone Mapping", &postProcess->toneMappingEnabled);
+                inspectorEditChanged = ImGui::Checkbox("Tone Mapping", &postProcess->toneMappingEnabled) || inspectorEditChanged;
                 if (postProcess->toneMappingEnabled)
                 {
-                    SliderAndInputFloat("Exposure", &postProcess->exposure, 0.1f, 5.0f);
-                    SliderAndInputFloat("Gamma", &postProcess->gamma, 0.1f, 4.0f);
+                    inspectorEditChanged = SliderAndInputFloat("Exposure", &postProcess->exposure, 0.1f, 5.0f) || inspectorEditChanged;
+                    inspectorEditChanged = SliderAndInputFloat("Gamma", &postProcess->gamma, 0.1f, 4.0f) || inspectorEditChanged;
                 }
-                ImGui::Checkbox("Color Adjust", &postProcess->colorAdjustEnabled);
+                inspectorEditChanged = ImGui::Checkbox("Color Adjust", &postProcess->colorAdjustEnabled) || inspectorEditChanged;
                 if (postProcess->colorAdjustEnabled)
                 {
-                    SliderAndInputFloat("Brightness", &postProcess->brightness, -1.0f, 1.0f);
-                    SliderAndInputFloat("Contrast", &postProcess->contrast, 0.0f, 3.0f);
-                    SliderAndInputFloat("Saturation", &postProcess->saturation, 0.0f, 3.0f);
+                    inspectorEditChanged = SliderAndInputFloat("Brightness", &postProcess->brightness, -1.0f, 1.0f) || inspectorEditChanged;
+                    inspectorEditChanged = SliderAndInputFloat("Contrast", &postProcess->contrast, 0.0f, 3.0f) || inspectorEditChanged;
+                    inspectorEditChanged = SliderAndInputFloat("Saturation", &postProcess->saturation, 0.0f, 3.0f) || inspectorEditChanged;
                 }
                 ImGui::Text("Current: %s", ToPostProcessStackSummary(*postProcess));
             }
@@ -1357,26 +1743,36 @@ namespace Engine::Editor
             if (Scene::PlayerStartComponent* playerStart = m_selectedObject->GetComponent<Scene::PlayerStartComponent>())
             {
                 ImGui::SeparatorText("Player Start");
-                DragAndInputFloat("Player Height", &playerStart->playerHeight, 0.05f, 0.0f, 10.0f);
-                DragAndInputFloat("Move Speed", &playerStart->moveSpeed, 0.05f, 0.0f, 100.0f);
-                DragAndInputFloat("Fast Multiplier", &playerStart->fastMoveMultiplier, 0.05f, 1.0f, 20.0f);
-                DragAndInputFloat("Mouse Sensitivity", &playerStart->mouseSensitivity, 0.0005f, 0.0001f, 0.1f);
+                inspectorEditChanged = DragAndInputFloat("Player Height", &playerStart->playerHeight, 0.05f, 0.0f, 10.0f) || inspectorEditChanged;
+                inspectorEditChanged = DragAndInputFloat("Move Speed", &playerStart->moveSpeed, 0.05f, 0.0f, 100.0f) || inspectorEditChanged;
+                inspectorEditChanged = DragAndInputFloat("Fast Multiplier", &playerStart->fastMoveMultiplier, 0.05f, 1.0f, 20.0f) || inspectorEditChanged;
+                inspectorEditChanged = DragAndInputFloat("Mouse Sensitivity", &playerStart->mouseSensitivity, 0.0005f, 0.0001f, 0.1f) || inspectorEditChanged;
                 playerStart->playerHeight = std::clamp(playerStart->playerHeight, 0.0f, 10.0f);
                 playerStart->moveSpeed = std::clamp(playerStart->moveSpeed, 0.0f, 100.0f);
                 playerStart->fastMoveMultiplier = std::clamp(playerStart->fastMoveMultiplier, 1.0f, 20.0f);
                 playerStart->mouseSensitivity = std::clamp(playerStart->mouseSensitivity, 0.0001f, 0.1f);
                 ImGui::TextUnformatted("Play Mode starts the first-person camera here.");
             }
+
+            if (inspectorEditChanged && !m_inspectorEditObject)
+            {
+                m_inspectorEditObject = m_selectedObject;
+                m_inspectorEditStart = GameObjectSnapshot::Capture(*m_selectedObject);
+                scene.MarkDirty();
+            }
+            if (m_inspectorEditObject && !ImGui::IsAnyItemActive())
+            {
+                const GameObjectSnapshot after = GameObjectSnapshot::Capture(*m_inspectorEditObject);
+                if (GameObjectSnapshot::IsDifferent(m_inspectorEditStart, after))
+                {
+                    m_commandManager->ExecuteCommand(std::make_unique<InspectorEditCommand>(*m_inspectorEditObject, m_inspectorEditStart, after));
+                }
+                m_inspectorEditObject = nullptr;
+            }
         }
         else
         {
             ImGui::TextUnformatted("No object selected.");
-        }
-        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
-            && ImGui::IsMouseReleased(ImGuiMouseButton_Left)
-            && !ImGui::GetIO().WantTextInput)
-        {
-            scene.MarkDirty();
         }
         ImGui::End();
 
@@ -1399,7 +1795,7 @@ namespace Engine::Editor
             RenderAssetBrowser(scene, renderer);
         }
         RenderModelEditor(scene, renderer);
-        m_staticMeshEditor.OnImGuiRender();
+        m_staticMeshEditor.OnImGuiRender(renderer);
 
         drawSplitter("##RightPanelSplitter",
             ImVec2(rightPanelX - splitterThickness * 0.5f, sideTop),
@@ -1541,6 +1937,11 @@ namespace Engine::Editor
         if (m_selectedObject && !objectExists(m_selectedObject))
         {
             m_selectedObject = nullptr;
+        }
+
+        if (m_outlinerSelectionAnchor && !objectExists(m_outlinerSelectionAnchor))
+        {
+            m_outlinerSelectionAnchor = nullptr;
         }
 
         if (!m_selectedObject && !m_selectedObjects.empty())
@@ -1770,6 +2171,112 @@ namespace Engine::Editor
 
         Core::Log::Info("Deleted selected object(s).");
         return true;
+    }
+
+    std::string EditorLayer::MakeUniqueOutlinerFolderName(const Scene::Scene& scene, const std::string& baseName) const
+    {
+        const std::string base = Trim(baseName).empty() ? "New Folder" : Trim(baseName);
+        if (!scene.HasOutlinerFolder(base))
+        {
+            return base;
+        }
+
+        for (int index = 1; index < 10000; ++index)
+        {
+            const std::string candidate = base + " " + std::to_string(index);
+            if (!scene.HasOutlinerFolder(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return base + " 10000";
+    }
+
+    void EditorLayer::CreateOutlinerFolder(Scene::Scene& scene)
+    {
+        const std::string folder = MakeUniqueOutlinerFolderName(scene, "New Folder");
+        scene.AddOutlinerFolder(folder);
+        scene.MarkDirty();
+        m_selectedOutlinerFolder = folder;
+        SetSingleSelectedObject(nullptr);
+        BeginRenameSelectedFolder();
+    }
+
+    void EditorLayer::BeginRenameSelectedFolder()
+    {
+        if (m_selectedOutlinerFolder.empty())
+        {
+            return;
+        }
+
+        m_renamingOutlinerFolder = m_selectedOutlinerFolder;
+        m_folderRenameBuffer.fill('\0');
+        const std::size_t copyCount = std::min(m_selectedOutlinerFolder.size(), m_folderRenameBuffer.size() - 1);
+        std::memcpy(m_folderRenameBuffer.data(), m_selectedOutlinerFolder.data(), copyCount);
+        m_focusFolderRenameInput = true;
+    }
+
+    void EditorLayer::CommitFolderRename(Scene::Scene& scene)
+    {
+        if (m_renamingOutlinerFolder.empty())
+        {
+            return;
+        }
+
+        const std::string trimmedName = Trim(m_folderRenameBuffer.data());
+        if (!trimmedName.empty() && trimmedName != m_renamingOutlinerFolder && !scene.HasOutlinerFolder(trimmedName))
+        {
+            const std::string oldFolder = m_renamingOutlinerFolder;
+            scene.RenameOutlinerFolder(oldFolder, trimmedName);
+            scene.MarkDirty();
+            m_selectedOutlinerFolder = trimmedName;
+        }
+
+        m_renamingOutlinerFolder.clear();
+        m_focusFolderRenameInput = false;
+    }
+
+    void EditorLayer::MoveObjectsToFolder(Scene::Scene& scene, const std::vector<Scene::GameObject*>& objects, const std::string& folder)
+    {
+        if (!folder.empty() && !scene.HasOutlinerFolder(folder))
+        {
+            scene.AddOutlinerFolder(folder);
+        }
+
+        std::vector<Scene::GameObject*> targets;
+        targets.reserve(objects.size());
+        for (Scene::GameObject* object : objects)
+        {
+            if (!object || object->GetOutlinerFolder() == folder)
+            {
+                continue;
+            }
+
+            if (std::find(targets.begin(), targets.end(), object) == targets.end())
+            {
+                targets.push_back(object);
+            }
+        }
+
+        if (targets.empty())
+        {
+            return;
+        }
+
+        EnsureCommandManager(scene);
+        if (m_commandManager)
+        {
+            m_commandManager->ExecuteCommand(std::make_unique<SetObjectFolderCommand>(targets, folder));
+        }
+        else
+        {
+            for (Scene::GameObject* object : targets)
+            {
+                object->SetOutlinerFolder(folder);
+            }
+            scene.MarkDirty();
+        }
     }
 
     void EditorLayer::BeginRenameSelected()
@@ -2650,6 +3157,22 @@ namespace Engine::Editor
                         current.size = { values[0], values[1], values[2] };
                     }
                 }
+                else if (key == "rotation")
+                {
+                    std::stringstream stream(value);
+                    std::string part;
+                    float values[3] = {};
+                    for (int i = 0; i < 3 && std::getline(stream, part, ','); ++i)
+                    {
+                        values[i] = std::stof(Trim(part));
+                    }
+                    current.rotation =
+                    {
+                        DirectX::XMConvertToRadians(values[0]),
+                        DirectX::XMConvertToRadians(values[1]),
+                        DirectX::XMConvertToRadians(values[2])
+                    };
+                }
                 else if (key == "radius")
                 {
                     current.radius = std::stof(value);
@@ -2696,6 +3219,7 @@ namespace Engine::Editor
             file << "[Collider]\n";
             file << "type=" << ToColliderTypeName(collider.type) << "\n";
             file << "center=" << collider.center.x << "," << collider.center.y << "," << collider.center.z << "\n";
+            file << "rotation=" << DirectX::XMConvertToDegrees(collider.rotation.x) << "," << DirectX::XMConvertToDegrees(collider.rotation.y) << "," << DirectX::XMConvertToDegrees(collider.rotation.z) << "\n";
             file << "size=" << collider.size.x << "," << collider.size.y << "," << collider.size.z << "\n";
             file << "radius=" << collider.radius << "\n";
             file << "is_trigger=" << (collider.isTrigger ? "true" : "false") << "\n\n";
@@ -2729,6 +3253,7 @@ namespace Engine::Editor
                 Physics::ColliderComponent& collider = object->AddComponent<Physics::ColliderComponent>();
                 collider.type = source.type;
                 collider.center = source.center;
+                collider.rotation = source.rotation;
                 collider.size = source.size;
                 collider.radius = source.radius;
                 collider.isTrigger = source.isTrigger;
@@ -2862,6 +3387,22 @@ namespace Engine::Editor
                     colliderSetChanged = true;
                 }
                 colliderSetChanged = DragAndInputFloat3("Center", &collider.center.x, 0.05f) || colliderSetChanged;
+                Math::Vector3 rotationDegrees =
+                {
+                    DirectX::XMConvertToDegrees(collider.rotation.x),
+                    DirectX::XMConvertToDegrees(collider.rotation.y),
+                    DirectX::XMConvertToDegrees(collider.rotation.z)
+                };
+                if (DragAndInputFloat3("Rotation (deg)", &rotationDegrees.x, 1.0f))
+                {
+                    collider.rotation =
+                    {
+                        DirectX::XMConvertToRadians(rotationDegrees.x),
+                        DirectX::XMConvertToRadians(rotationDegrees.y),
+                        DirectX::XMConvertToRadians(rotationDegrees.z)
+                    };
+                    colliderSetChanged = true;
+                }
                 colliderSetChanged = DragAndInputFloat3("Size", &collider.size.x, 0.05f, 0.01f, 1000.0f) || colliderSetChanged;
                 colliderSetChanged = DragAndInputFloat("Radius", &collider.radius, 0.05f, 0.01f, 1000.0f) || colliderSetChanged;
                 collider.size.x = std::clamp(collider.size.x, 0.01f, 1000.0f);
@@ -2969,8 +3510,8 @@ namespace Engine::Editor
         const ImVec2 mouse = { static_cast<float>(mouseX), static_cast<float>(mouseY) };
         const ImVec2 originScreen = ProjectWorldToScreen(camera, origin, width, height);
         constexpr float axisLength = 1.5f;
-        constexpr float ringRadius = 1.15f;
         constexpr float pickThresholdPixels = 14.0f;
+        const float ringRadius = GetGizmoRadiusForCamera(camera, origin);
         const Math::Vector3 localAxes[] =
         {
             GetLocalAxisVector(transform, GizmoAxis::X),
@@ -2984,18 +3525,35 @@ namespace Engine::Editor
 
         if (m_gizmoMode == GizmoMode::Rotate)
         {
-            const float distances[] =
+            const Physics::Ray ray = MakeMouseRayFromCamera(camera, mouseX, mouseY, width, height);
+            const Math::Vector3 worldAxes[] =
             {
-                DistancePointToProjectedCircle(camera, mouse, origin, ringRadius, localAxes[1], localAxes[2], width, height),
-                DistancePointToProjectedCircle(camera, mouse, origin, ringRadius, localAxes[0], localAxes[2], width, height),
-                DistancePointToProjectedCircle(camera, mouse, origin, ringRadius, localAxes[0], localAxes[1], width, height)
+                GetAxisVector(GizmoAxis::X),
+                GetAxisVector(GizmoAxis::Y),
+                GetAxisVector(GizmoAxis::Z)
             };
+            const float worldTolerance = std::max(0.05f, ringRadius * 0.12f);
 
             for (int i = 0; i < 3; ++i)
             {
-                if (distances[i] < bestDistance)
+                Math::Vector3 hitPoint;
+                if (!IntersectRayPlane(ray, origin, worldAxes[i], hitPoint))
                 {
-                    bestDistance = distances[i];
+                    continue;
+                }
+
+                const float radiusDistance = std::abs(Distance(hitPoint, origin) - ringRadius);
+                if (radiusDistance > worldTolerance)
+                {
+                    continue;
+                }
+
+                const Math::Vector3 basisA = i == 0 ? GetAxisVector(GizmoAxis::Y) : GetAxisVector(GizmoAxis::X);
+                const Math::Vector3 basisB = i == 2 ? GetAxisVector(GizmoAxis::Y) : GetAxisVector(GizmoAxis::Z);
+                const float screenDistance = DistancePointToProjectedCircle(camera, mouse, origin, ringRadius, basisA, basisB, width, height);
+                if (screenDistance < bestDistance)
+                {
+                    bestDistance = screenDistance;
                     bestAxis = axes[i];
                 }
             }
@@ -3024,11 +3582,13 @@ namespace Engine::Editor
         return bestAxis;
     }
 
-    void EditorLayer::BeginGizmoDrag()
+    void EditorLayer::BeginGizmoDrag(const Scene::Camera& camera, const Input::Input& input, float width, float height)
     {
         m_moveSnapRemainder = 0.0f;
         m_rotateSnapRemainder = 0.0f;
         m_scaleSnapRemainder = 0.0f;
+        m_gizmoRotateDragValid = false;
+        m_gizmoDragStartTransforms.clear();
 
         if (!m_selectedObject)
         {
@@ -3038,9 +3598,51 @@ namespace Engine::Editor
         const Math::Transform& transform = m_selectedObject->GetTransform();
         m_gizmoDragObject = m_selectedObject;
         m_gizmoDragStartTransform = transform;
+        std::vector<Scene::GameObject*> targets = m_selectedObjects;
+        if (targets.empty())
+        {
+            targets.push_back(m_selectedObject);
+        }
+        std::sort(targets.begin(), targets.end());
+        targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
+        for (Scene::GameObject* object : targets)
+        {
+            if (object)
+            {
+                m_gizmoDragStartTransforms.push_back({ object, object->GetTransform() });
+            }
+        }
+
         m_dragStartLocalAxes[0] = GetLocalAxisVector(transform, GizmoAxis::X);
         m_dragStartLocalAxes[1] = GetLocalAxisVector(transform, GizmoAxis::Y);
         m_dragStartLocalAxes[2] = GetLocalAxisVector(transform, GizmoAxis::Z);
+
+        if (m_gizmoMode != GizmoMode::Rotate || width <= 0.0f || height <= 0.0f)
+        {
+            return;
+        }
+
+        m_gizmoDragCenter = transform.position;
+        m_gizmoDragAxis = GetAxisVector(m_activeGizmoAxis);
+        const ImVec2 screenCenter = ProjectWorldToScreen(camera, m_gizmoDragCenter, width, height);
+        m_gizmoDragScreenCenterX = screenCenter.x;
+        m_gizmoDragScreenCenterY = screenCenter.y;
+        if (!GetScreenCircleAngle(
+            m_gizmoDragScreenCenterX,
+            m_gizmoDragScreenCenterY,
+            static_cast<float>(input.GetMouseX()),
+            static_cast<float>(input.GetMouseY()),
+            m_gizmoDragStartScreenAngle))
+        {
+            m_activeGizmoAxis = GizmoAxis::None;
+            return;
+        }
+
+        m_gizmoRotateDragValid = true;
+        if (m_debugRotationGizmo)
+        {
+            Core::Log::Info("Rotate gizmo drag started. Axis=" + std::to_string(GetAxisIndex(m_activeGizmoAxis)));
+        }
     }
 
     void EditorLayer::EndGizmoDrag()
@@ -3053,6 +3655,8 @@ namespace Engine::Editor
             }
         }
         m_gizmoDragObject = nullptr;
+        m_gizmoDragStartTransforms.clear();
+        m_gizmoRotateDragValid = false;
         m_activeGizmoAxis = GizmoAxis::None;
         m_moveSnapRemainder = 0.0f;
         m_rotateSnapRemainder = 0.0f;
@@ -3096,14 +3700,17 @@ namespace Engine::Editor
         float axisScreenX = endScreen.x - originScreen.x;
         float axisScreenY = endScreen.y - originScreen.y;
         const float axisLength = std::sqrt(axisScreenX * axisScreenX + axisScreenY * axisScreenY);
-        if (axisLength <= 0.001f)
+        float projectedPixels = 0.0f;
+        if (axisLength > 0.001f)
+        {
+            axisScreenX /= axisLength;
+            axisScreenY /= axisLength;
+            projectedPixels = static_cast<float>(mouseDeltaX) * axisScreenX + static_cast<float>(mouseDeltaY) * axisScreenY;
+        }
+        else if (m_gizmoMode != GizmoMode::Rotate)
         {
             return;
         }
-
-        axisScreenX /= axisLength;
-        axisScreenY /= axisLength;
-        const float projectedPixels = static_cast<float>(mouseDeltaX) * axisScreenX + static_cast<float>(mouseDeltaY) * axisScreenY;
 
         const DirectX::XMVECTOR cameraPosition = DirectX::XMLoadFloat3(&camera.position);
         const DirectX::XMVECTOR objectPosition = DirectX::XMLoadFloat3(&origin);
@@ -3139,50 +3746,55 @@ namespace Engine::Editor
         }
         case GizmoMode::Rotate:
         {
+            if (!m_gizmoRotateDragValid)
+            {
+                break;
+            }
+
+            float currentScreenAngle = 0.0f;
+            if (!GetScreenCircleAngle(
+                m_gizmoDragScreenCenterX,
+                m_gizmoDragScreenCenterY,
+                static_cast<float>(input.GetMouseX()),
+                static_cast<float>(input.GetMouseY()),
+                currentScreenAngle))
+            {
+                break;
+            }
+
+            float deltaAngle = NormalizeSignedAngle(currentScreenAngle - m_gizmoDragStartScreenAngle);
+            if (!std::isfinite(deltaAngle))
+            {
+                break;
+            }
+
+            if (m_rotateSnapStep > 0.0001f)
+            {
+                deltaAngle = std::round(deltaAngle / m_rotateSnapStep) * m_rotateSnapStep;
+            }
+
             const int axisIndex = GetAxisIndex(m_activeGizmoAxis);
-            const Math::Vector3 normal = m_dragStartLocalAxes[axisIndex];
-            Math::Vector3 basisA = m_dragStartLocalAxes[0];
-            Math::Vector3 basisB = m_dragStartLocalAxes[1];
-            if (m_activeGizmoAxis == GizmoAxis::X)
+            for (const std::pair<Scene::GameObject*, Math::Transform>& entry : m_gizmoDragStartTransforms)
             {
-                basisA = m_dragStartLocalAxes[1];
-                basisB = m_dragStartLocalAxes[2];
-            }
-            else if (m_activeGizmoAxis == GizmoAxis::Y)
-            {
-                basisA = m_dragStartLocalAxes[0];
-                basisB = m_dragStartLocalAxes[2];
-            }
-
-            float currentAngle = 0.0f;
-            float previousAngle = 0.0f;
-            if (!GetRingMouseAngle(camera, input.GetMouseX(), input.GetMouseY(), origin, normal, basisA, basisB, width, height, currentAngle)
-                || !GetRingMouseAngle(camera, input.GetMouseX() - mouseDeltaX, input.GetMouseY() - mouseDeltaY, origin, normal, basisA, basisB, width, height, previousAngle))
-            {
-                break;
-            }
-
-            const float deltaAngle = std::atan2(std::sin(currentAngle - previousAngle), std::cos(currentAngle - previousAngle));
-            m_rotateSnapRemainder += deltaAngle;
-            const float steps = std::trunc(m_rotateSnapRemainder / m_rotateSnapStep);
-            if (steps == 0.0f)
-            {
-                break;
-            }
-
-            const float amount = steps * m_rotateSnapStep;
-            m_rotateSnapRemainder -= amount;
-            for (Scene::GameObject* object : targets)
-            {
+                Scene::GameObject* object = entry.first;
                 if (!object)
                 {
                     continue;
                 }
 
-                Math::Transform& transform = object->GetTransform();
-                transform.rotation.x += axisVector.x * amount;
-                transform.rotation.y += axisVector.y * amount;
-                transform.rotation.z += axisVector.z * amount;
+                Math::Transform transform = entry.second;
+                transform.rotation = ApplyRotationAroundDisplayedRing(entry.second.rotation, m_gizmoDragAxis, deltaAngle);
+                if (!IsFiniteRotation(transform.rotation))
+                {
+                    continue;
+                }
+
+                object->GetTransform().rotation = transform.rotation;
+            }
+
+            if (m_debugRotationGizmo)
+            {
+                Core::Log::Info("Rotate gizmo delta(rad)=" + std::to_string(deltaAngle) + " axis=" + std::to_string(axisIndex));
             }
             break;
         }
@@ -3387,19 +3999,19 @@ namespace Engine::Editor
         if (m_showGizmoTools)
         {
             ImGui::SeparatorText("Gizmo Prep");
-            ImGui::TextUnformatted("Mode");
+            ImGui::TextUnformatted("Mode (W Move / R Rotate / S Scale)");
             ImGui::SameLine();
-            if (ImGui::RadioButton("Move", m_gizmoMode == GizmoMode::Move))
+            if (ImGui::RadioButton("Move##GizmoMove", m_gizmoMode == GizmoMode::Move))
             {
                 m_gizmoMode = GizmoMode::Move;
             }
             ImGui::SameLine();
-            if (ImGui::RadioButton("Rotate", m_gizmoMode == GizmoMode::Rotate))
+            if (ImGui::RadioButton("Rotate##GizmoRotate", m_gizmoMode == GizmoMode::Rotate))
             {
                 m_gizmoMode = GizmoMode::Rotate;
             }
             ImGui::SameLine();
-            if (ImGui::RadioButton("Scale", m_gizmoMode == GizmoMode::Scale))
+            if (ImGui::RadioButton("Scale##GizmoScale", m_gizmoMode == GizmoMode::Scale))
             {
                 m_gizmoMode = GizmoMode::Scale;
             }

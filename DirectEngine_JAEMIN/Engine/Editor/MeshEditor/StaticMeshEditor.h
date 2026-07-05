@@ -16,6 +16,11 @@ namespace Engine::Resource
     class ResourceManager;
 }
 
+namespace Engine::Renderer
+{
+    class Renderer;
+}
+
 namespace Engine::Editor
 {
     class StaticMeshEditor
@@ -27,7 +32,7 @@ namespace Engine::Editor
         void Close();
         bool IsOpen() const;
         void OnUpdate(float deltaTime);
-        void OnImGuiRender();
+        void OnImGuiRender(Renderer::Renderer& renderer);
 
     private:
         void DrawToolbar();
@@ -46,10 +51,11 @@ namespace Engine::Editor
         StaticMeshPreviewViewport m_previewViewport;
         std::vector<StaticMeshPreviewViewport::ColliderPreview> m_colliders;
         int m_selectedColliderIndex = -1;
-        bool m_showGrid = true;
+        bool m_showGrid = false;
         bool m_showAxis = true;
-        bool m_showBounds = true;
+        bool m_showBounds = false;
         bool m_showCollider = false;
+        ColliderGizmoMode m_colliderGizmoMode = ColliderGizmoMode::Move;
         std::string m_errorText;
     };
 }

@@ -90,6 +90,7 @@ namespace Engine::Scene
     void Scene::Clear()
     {
         m_gameObjects.clear();
+        m_outlinerFolders.clear();
         m_activeCamera.reset();
         m_directionalLight.reset();
         m_filePath.clear();
@@ -132,6 +133,61 @@ namespace Engine::Scene
     const std::vector<std::unique_ptr<GameObject>>& Scene::GetGameObjects() const
     {
         return m_gameObjects;
+    }
+
+    const std::vector<std::string>& Scene::GetOutlinerFolders() const
+    {
+        return m_outlinerFolders;
+    }
+
+    bool Scene::HasOutlinerFolder(const std::string& folder) const
+    {
+        return std::find(m_outlinerFolders.begin(), m_outlinerFolders.end(), folder) != m_outlinerFolders.end();
+    }
+
+    void Scene::AddOutlinerFolder(std::string folder)
+    {
+        if (folder.empty() || HasOutlinerFolder(folder))
+        {
+            return;
+        }
+
+        m_outlinerFolders.push_back(std::move(folder));
+    }
+
+    void Scene::RenameOutlinerFolder(const std::string& oldFolder, std::string newFolder)
+    {
+        if (oldFolder.empty() || newFolder.empty() || oldFolder == newFolder || HasOutlinerFolder(newFolder))
+        {
+            return;
+        }
+
+        auto it = std::find(m_outlinerFolders.begin(), m_outlinerFolders.end(), oldFolder);
+        if (it == m_outlinerFolders.end())
+        {
+            return;
+        }
+
+        *it = newFolder;
+        for (const std::unique_ptr<GameObject>& object : m_gameObjects)
+        {
+            if (object->GetOutlinerFolder() == oldFolder)
+            {
+                object->SetOutlinerFolder(newFolder);
+            }
+        }
+    }
+
+    void Scene::RemoveOutlinerFolder(const std::string& folder)
+    {
+        m_outlinerFolders.erase(std::remove(m_outlinerFolders.begin(), m_outlinerFolders.end(), folder), m_outlinerFolders.end());
+        for (const std::unique_ptr<GameObject>& object : m_gameObjects)
+        {
+            if (object->GetOutlinerFolder() == folder)
+            {
+                object->SetOutlinerFolder({});
+            }
+        }
     }
 
     bool Scene::IsDirty() const

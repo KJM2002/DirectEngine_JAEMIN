@@ -16,8 +16,8 @@ namespace Engine::Physics
 
         const Math::Transform& transform = owner->GetTransform();
         const DirectX::XMVECTOR localCenter = DirectX::XMVectorSet(center.x * transform.scale.x, center.y * transform.scale.y, center.z * transform.scale.z, 0.0f);
-        const DirectX::XMMATRIX rotation = DirectX::XMMatrixRotationRollPitchYaw(transform.rotation.x, transform.rotation.y, transform.rotation.z);
-        const DirectX::XMVECTOR worldCenter = DirectX::XMVectorAdd(DirectX::XMLoadFloat3(&transform.position), DirectX::XMVector3TransformNormal(localCenter, rotation));
+        const DirectX::XMMATRIX ownerRotation = DirectX::XMMatrixRotationRollPitchYaw(transform.rotation.x, transform.rotation.y, transform.rotation.z);
+        const DirectX::XMVECTOR worldCenter = DirectX::XMVectorAdd(DirectX::XMLoadFloat3(&transform.position), DirectX::XMVector3TransformNormal(localCenter, ownerRotation));
 
         Math::Vector3 result;
         DirectX::XMStoreFloat3(&result, worldCenter);
@@ -62,10 +62,12 @@ namespace Engine::Physics
             return { 1.0f, 0.0f, 0.0f };
         }
 
-        const Math::Vector3& rotationValue = owner->GetTransform().rotation;
-        const DirectX::XMMATRIX rotation = DirectX::XMMatrixRotationRollPitchYaw(rotationValue.x, rotationValue.y, rotationValue.z);
+        const Math::Vector3& ownerRotationValue = owner->GetTransform().rotation;
+        const DirectX::XMMATRIX colliderRotation = DirectX::XMMatrixRotationRollPitchYaw(rotation.x, rotation.y, rotation.z);
+        const DirectX::XMMATRIX ownerRotation = DirectX::XMMatrixRotationRollPitchYaw(ownerRotationValue.x, ownerRotationValue.y, ownerRotationValue.z);
+        const DirectX::XMMATRIX rotationMatrix = colliderRotation * ownerRotation;
         Math::Vector3 result;
-        DirectX::XMStoreFloat3(&result, DirectX::XMVector3Normalize(DirectX::XMVector3TransformNormal(DirectX::XMVectorSet(1.0f, 0.0f, 0.0f, 0.0f), rotation)));
+        DirectX::XMStoreFloat3(&result, DirectX::XMVector3Normalize(DirectX::XMVector3TransformNormal(DirectX::XMVectorSet(1.0f, 0.0f, 0.0f, 0.0f), rotationMatrix)));
         return result;
     }
 
@@ -77,10 +79,12 @@ namespace Engine::Physics
             return { 0.0f, 1.0f, 0.0f };
         }
 
-        const Math::Vector3& rotationValue = owner->GetTransform().rotation;
-        const DirectX::XMMATRIX rotation = DirectX::XMMatrixRotationRollPitchYaw(rotationValue.x, rotationValue.y, rotationValue.z);
+        const Math::Vector3& ownerRotationValue = owner->GetTransform().rotation;
+        const DirectX::XMMATRIX colliderRotation = DirectX::XMMatrixRotationRollPitchYaw(rotation.x, rotation.y, rotation.z);
+        const DirectX::XMMATRIX ownerRotation = DirectX::XMMatrixRotationRollPitchYaw(ownerRotationValue.x, ownerRotationValue.y, ownerRotationValue.z);
+        const DirectX::XMMATRIX rotationMatrix = colliderRotation * ownerRotation;
         Math::Vector3 result;
-        DirectX::XMStoreFloat3(&result, DirectX::XMVector3Normalize(DirectX::XMVector3TransformNormal(DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f), rotation)));
+        DirectX::XMStoreFloat3(&result, DirectX::XMVector3Normalize(DirectX::XMVector3TransformNormal(DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f), rotationMatrix)));
         return result;
     }
 
@@ -92,10 +96,12 @@ namespace Engine::Physics
             return { 0.0f, 0.0f, 1.0f };
         }
 
-        const Math::Vector3& rotationValue = owner->GetTransform().rotation;
-        const DirectX::XMMATRIX rotation = DirectX::XMMatrixRotationRollPitchYaw(rotationValue.x, rotationValue.y, rotationValue.z);
+        const Math::Vector3& ownerRotationValue = owner->GetTransform().rotation;
+        const DirectX::XMMATRIX colliderRotation = DirectX::XMMatrixRotationRollPitchYaw(rotation.x, rotation.y, rotation.z);
+        const DirectX::XMMATRIX ownerRotation = DirectX::XMMatrixRotationRollPitchYaw(ownerRotationValue.x, ownerRotationValue.y, ownerRotationValue.z);
+        const DirectX::XMMATRIX rotationMatrix = colliderRotation * ownerRotation;
         Math::Vector3 result;
-        DirectX::XMStoreFloat3(&result, DirectX::XMVector3Normalize(DirectX::XMVector3TransformNormal(DirectX::XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f), rotation)));
+        DirectX::XMStoreFloat3(&result, DirectX::XMVector3Normalize(DirectX::XMVector3TransformNormal(DirectX::XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f), rotationMatrix)));
         return result;
     }
 }

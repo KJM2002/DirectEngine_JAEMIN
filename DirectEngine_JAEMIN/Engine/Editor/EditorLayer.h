@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Asset/AssetDatabase.h"
+#include "Engine/Editor/Command/GameObjectSnapshot.h"
 #include "Engine/Editor/EditorDirtyManager.h"
 #include "Engine/Editor/MeshEditor/StaticMeshEditor.h"
 #include "Engine/Math/MathTypes.h"
@@ -12,6 +13,7 @@
 #include <array>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace Engine::Debug
@@ -118,6 +120,11 @@ namespace Engine::Editor
         bool ApplyMaterialToSelectedObjects(Renderer::Renderer& renderer, const std::wstring& materialPath);
         bool DeleteSelectedObjects(Scene::Scene& scene);
         Scene::GameObject* DuplicateSelectedObject(Scene::Scene& scene);
+        void CreateOutlinerFolder(Scene::Scene& scene);
+        void BeginRenameSelectedFolder();
+        void CommitFolderRename(Scene::Scene& scene);
+        void MoveObjectsToFolder(Scene::Scene& scene, const std::vector<Scene::GameObject*>& objects, const std::string& folder);
+        std::string MakeUniqueOutlinerFolderName(const Scene::Scene& scene, const std::string& baseName) const;
         void BeginRenameSelected();
         void CommitRename();
         void BeginRenameSelectedAsset();
@@ -146,7 +153,7 @@ namespace Engine::Editor
         bool SaveModelColliderAsset() const;
         bool ApplyModelCollidersToSelectedObjects();
         GizmoAxis PickGizmoAxis(const Scene::Camera& camera, int mouseX, int mouseY, float width, float height) const;
-        void BeginGizmoDrag();
+        void BeginGizmoDrag(const Scene::Camera& camera, const Input::Input& input, float width, float height);
         void EndGizmoDrag();
         void ApplyGizmoDrag(const Scene::Camera& camera, const Input::Input& input, float width, float height);
         void ShowNotification(const std::string& text, float seconds = 2.0f);
@@ -163,18 +170,34 @@ namespace Engine::Editor
         float m_rotateSnapStep = 0.1f;
         float m_scaleSnapStep = 0.1f;
         std::array<Math::Vector3, 3> m_dragStartLocalAxes = {};
+        std::vector<std::pair<Scene::GameObject*, Math::Transform>> m_gizmoDragStartTransforms;
+        Math::Vector3 m_gizmoDragCenter = { 0.0f, 0.0f, 0.0f };
+        Math::Vector3 m_gizmoDragAxis = { 0.0f, 0.0f, 0.0f };
+        Math::Vector3 m_gizmoDragStartVector = { 0.0f, 0.0f, 0.0f };
+        float m_gizmoDragScreenCenterX = 0.0f;
+        float m_gizmoDragScreenCenterY = 0.0f;
+        float m_gizmoDragStartScreenAngle = 0.0f;
+        bool m_gizmoRotateDragValid = false;
+        bool m_debugRotationGizmo = false;
         Math::Transform m_gizmoDragStartTransform;
         Scene::GameObject* m_gizmoDragObject = nullptr;
         Math::Transform m_inspectorTransformStart;
         Scene::GameObject* m_inspectorTransformObject = nullptr;
+        GameObjectSnapshot m_inspectorEditStart;
+        Scene::GameObject* m_inspectorEditObject = nullptr;
         std::array<char, 128> m_renameBuffer = {};
         std::array<char, 128> m_newMaterialNameBuffer = {};
         std::array<char, 128> m_newSceneNameBuffer = {};
         std::array<char, 128> m_saveMaterialAsBuffer = {};
         std::array<char, 128> m_assetRenameBuffer = {};
+        std::array<char, 128> m_folderRenameBuffer = {};
         Scene::GameObject* m_renamingObject = nullptr;
+        std::string m_selectedOutlinerFolder;
+        std::string m_renamingOutlinerFolder;
+        Scene::GameObject* m_outlinerSelectionAnchor = nullptr;
         bool m_focusRenameInput = false;
         bool m_focusAssetRenameInput = false;
+        bool m_focusFolderRenameInput = false;
         bool m_playMode = false;
         bool m_wantsInputCapture = false;
         bool m_showColliders = true;
@@ -197,6 +220,7 @@ namespace Engine::Editor
         {
             Physics::ColliderType type = Physics::ColliderType::AABB;
             Math::Vector3 center = { 0.0f, 0.0f, 0.0f };
+            Math::Vector3 rotation = { 0.0f, 0.0f, 0.0f };
             Math::Vector3 size = { 1.0f, 1.0f, 1.0f };
             float radius = 0.5f;
             bool isTrigger = false;

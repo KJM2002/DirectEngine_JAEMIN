@@ -16,6 +16,7 @@ namespace Engine::Physics
     public:
         ColliderType type = ColliderType::AABB;
         Math::Vector3 center = { 0.0f, 0.0f, 0.0f };
+        Math::Vector3 rotation = { 0.0f, 0.0f, 0.0f };
         Math::Vector3 size = { 1.0f, 1.0f, 1.0f };
         float radius = 0.5f;
         bool isTrigger = false;

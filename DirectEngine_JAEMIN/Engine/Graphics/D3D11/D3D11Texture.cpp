@@ -36,6 +36,11 @@ namespace Engine::Graphics::D3D11
         return m_desc.height;
     }
 
+    void* D3D11Texture::GetNativeShaderResourceHandleForUI() const
+    {
+        return m_shaderResourceView.Get();
+    }
+
     ID3D11ShaderResourceView* D3D11Texture::GetShaderResourceView() const
     {
         return m_shaderResourceView.Get();

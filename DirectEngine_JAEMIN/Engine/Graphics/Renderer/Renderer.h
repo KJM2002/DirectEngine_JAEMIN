@@ -99,6 +99,7 @@ namespace Engine::Renderer
         void Render(const Scene::GameObject& object);
         void RenderColliders(const Scene::Scene& scene, const Scene::GameObject* selectedObject, bool enabled);
         void RenderSelectionGizmo(const Scene::GameObject* selectedObject, bool enabled, GizmoVisualMode mode);
+        void* RenderStaticMeshPreview(const Mesh& mesh, std::uint32_t width, std::uint32_t height, const Math::Matrix4x4& view, const Math::Matrix4x4& projection);
         void ApplyPostProcess();
         void SetPostProcessSettings(const PostProcessSettings& settings);
         PostProcessSettings GetPostProcessSettings() const;
@@ -109,6 +110,7 @@ namespace Engine::Renderer
 
     private:
         bool CreateRenderResources();
+        void DrawMeshWithMatrices(const Mesh& mesh, const Material& material, const Math::Transform& transform, const Math::Matrix4x4& view, const Math::Matrix4x4& projection);
 
         std::unique_ptr<RHI::RHIDevice> m_device;
         std::unique_ptr<RHI::RHISwapChain> m_swapChain;
@@ -123,6 +125,8 @@ namespace Engine::Renderer
         std::shared_ptr<RHI::RHIBuffer> m_shadowConstantBuffer;
         std::shared_ptr<RHI::RHITexture> m_sceneColorTarget;
         std::shared_ptr<RHI::RHITexture> m_sceneDepthTarget;
+        std::shared_ptr<RHI::RHITexture> m_previewColorTarget;
+        std::shared_ptr<RHI::RHITexture> m_previewDepthTarget;
         const Scene::Camera* m_activeCamera = nullptr;
         const Scene::DirectionalLight* m_directionalLight = nullptr;
         std::vector<RenderLight> m_lights;
@@ -132,6 +136,8 @@ namespace Engine::Renderer
         std::uint32_t m_triangleCount = 0;
         std::uint32_t m_width = 0;
         std::uint32_t m_height = 0;
+        std::uint32_t m_previewWidth = 0;
+        std::uint32_t m_previewHeight = 0;
         bool m_enableShadows = false;
         bool m_enablePostProcess = false;
     };

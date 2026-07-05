@@ -39,12 +39,14 @@ namespace Engine::Scene
             {
                 Physics::ColliderType type = Physics::ColliderType::AABB;
                 Math::Vector3 center = { 0.0f, 0.0f, 0.0f };
+                Math::Vector3 rotation = { 0.0f, 0.0f, 0.0f };
                 Math::Vector3 size = { 1.0f, 1.0f, 1.0f };
                 float radius = 0.5f;
                 bool isTrigger = false;
             };
 
             std::string name = "GameObject";
+            std::string folder;
             Math::Vector3 position = { 0.0f, 0.0f, 0.0f };
             Math::Vector3 rotation = { 0.0f, 0.0f, 0.0f };
             Math::Vector3 scale = { 1.0f, 1.0f, 1.0f };
@@ -75,6 +77,7 @@ namespace Engine::Scene
             bool hasCollider = false;
             Physics::ColliderType colliderType = Physics::ColliderType::AABB;
             Math::Vector3 colliderCenter = { 0.0f, 0.0f, 0.0f };
+            Math::Vector3 colliderRotation = { 0.0f, 0.0f, 0.0f };
             Math::Vector3 colliderSize = { 1.0f, 1.0f, 1.0f };
             float colliderRadius = 0.5f;
             bool colliderIsTrigger = false;
@@ -268,6 +271,11 @@ namespace Engine::Scene
             }
 
             GameObject& object = scene.CreateGameObject(desc.name);
+            object.SetOutlinerFolder(desc.folder);
+            if (!desc.folder.empty())
+            {
+                scene.AddOutlinerFolder(desc.folder);
+            }
             object.GetTransform().position = desc.position;
             object.GetTransform().rotation = desc.rotation;
             object.GetTransform().scale = desc.scale;
@@ -361,7 +369,7 @@ namespace Engine::Scene
             {
                 if (desc.colliders.empty())
                 {
-                    desc.colliders.push_back({ desc.colliderType, desc.colliderCenter, desc.colliderSize, desc.colliderRadius, desc.colliderIsTrigger });
+                    desc.colliders.push_back({ desc.colliderType, desc.colliderCenter, desc.colliderRotation, desc.colliderSize, desc.colliderRadius, desc.colliderIsTrigger });
                 }
 
                 for (const ObjectDesc::ColliderDesc& source : desc.colliders)
@@ -369,6 +377,7 @@ namespace Engine::Scene
                     Physics::ColliderComponent& collider = object.AddComponent<Physics::ColliderComponent>();
                     collider.type = source.type;
                     collider.center = source.center;
+                    collider.rotation = source.rotation;
                     collider.size = source.size;
                     collider.radius = source.radius;
                     collider.isTrigger = source.isTrigger;
@@ -477,11 +486,21 @@ namespace Engine::Scene
 
             try
             {
+                if (key == "outliner_folder")
+                {
+                    scene.AddOutlinerFolder(value);
+                    continue;
+                }
+
                 if (section == Section::GameObject)
                 {
                     if (key == "name")
                     {
                         objectDesc.name = value;
+                    }
+                    else if (key == "folder")
+                    {
+                        objectDesc.folder = value;
                     }
                     else if (key == "position")
                     {
@@ -641,6 +660,16 @@ namespace Engine::Scene
                             objectDesc.colliders.push_back({});
                         }
                         objectDesc.colliders.back().center = objectDesc.colliderCenter;
+                    }
+                    else if (key == "collider_rotation")
+                    {
+                        objectDesc.hasCollider = true;
+                        ParseVector3(value, objectDesc.colliderRotation);
+                        if (objectDesc.colliders.empty())
+                        {
+                            objectDesc.colliders.push_back({});
+                        }
+                        objectDesc.colliders.back().rotation = objectDesc.colliderRotation;
                     }
                     else if (key == "size")
                     {
@@ -869,7 +898,12 @@ namespace Engine::Scene
             return false;
         }
 
-        file << "scene_name=SavedScene\n\n";
+        file << "scene_name=SavedScene\n";
+        for (const std::string& folder : scene.GetOutlinerFolders())
+        {
+            file << "outliner_folder=" << folder << "\n";
+        }
+        file << "\n";
 
         if (const std::shared_ptr<Camera>& camera = scene.GetActiveCamera())
         {
@@ -898,6 +932,10 @@ namespace Engine::Scene
         {
             file << "[GameObject]\n";
             file << "name=" << object->GetName() << "\n";
+            if (!object->GetOutlinerFolder().empty())
+            {
+                file << "folder=" << object->GetOutlinerFolder() << "\n";
+            }
             WriteVector3(file, "position", object->GetTransform().position);
             WriteVector3(file, "rotation", object->GetTransform().rotation);
             WriteVector3(file, "scale", object->GetTransform().scale);
@@ -975,6 +1013,7 @@ namespace Engine::Scene
                 file << "component=Collider\n";
                 file << "collider_type=" << ToColliderTypeString(collider->type) << "\n";
                 WriteVector3(file, "center", collider->center);
+                WriteVector3(file, "collider_rotation", collider->rotation);
                 WriteVector3(file, "size", collider->size);
                 file << "radius=" << collider->radius << "\n";
                 file << "is_trigger=" << (collider->isTrigger ? "true" : "false") << "\n";

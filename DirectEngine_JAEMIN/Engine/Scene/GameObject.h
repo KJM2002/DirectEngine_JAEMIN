@@ -23,6 +23,8 @@ namespace Engine::Scene
 
         const std::string& GetName() const;
         void SetName(std::string name);
+        const std::string& GetOutlinerFolder() const;
+        void SetOutlinerFolder(std::string folder);
         Math::Transform& GetTransform();
         const Math::Transform& GetTransform() const;
 
@@ -88,6 +90,7 @@ namespace Engine::Scene
 
     private:
         std::string m_name;
+        std::string m_outlinerFolder;
         Math::Transform m_transform;
         std::vector<std::shared_ptr<Component>> m_components;
     };

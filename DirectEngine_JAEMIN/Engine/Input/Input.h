@@ -7,6 +7,7 @@ namespace Engine::Input
     enum KeyCode
     {
         KeyW = 'W',
+        KeyR = 'R',
         KeyA = 'A',
         KeyS = 'S',
         KeyD = 'D',

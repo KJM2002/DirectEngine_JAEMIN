@@ -156,7 +156,13 @@
     <ClCompile Include="Engine\Editor\Command\GameObjectSnapshot.cpp">
       <Filter>Engine\Editor\Command</Filter>
     </ClCompile>
+    <ClCompile Include="Engine\Editor\Command\InspectorEditCommand.cpp">
+      <Filter>Engine\Editor\Command</Filter>
+    </ClCompile>
     <ClCompile Include="Engine\Editor\Command\RenameGameObjectCommand.cpp">
+      <Filter>Engine\Editor\Command</Filter>
+    </ClCompile>
+    <ClCompile Include="Engine\Editor\Command\SetObjectFolderCommand.cpp">
       <Filter>Engine\Editor\Command</Filter>
     </ClCompile>
     <ClCompile Include="Engine\Editor\Command\TransformCommand.cpp">
@@ -396,7 +402,13 @@
     <ClInclude Include="Engine\Editor\Command\ICommand.h">
       <Filter>Engine\Editor\Command</Filter>
     </ClInclude>
+    <ClInclude Include="Engine\Editor\Command\InspectorEditCommand.h">
+      <Filter>Engine\Editor\Command</Filter>
+    </ClInclude>
     <ClInclude Include="Engine\Editor\Command\RenameGameObjectCommand.h">
+      <Filter>Engine\Editor\Command</Filter>
+    </ClInclude>
+    <ClInclude Include="Engine\Editor\Command\SetObjectFolderCommand.h">
       <Filter>Engine\Editor\Command</Filter>
     </ClInclude>
     <ClInclude Include="Engine\Editor\Command\TransformCommand.h">

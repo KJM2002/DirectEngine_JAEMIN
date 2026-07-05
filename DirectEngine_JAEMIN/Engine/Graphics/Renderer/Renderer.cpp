@@ -190,6 +190,8 @@ namespace Engine::Renderer
         m_shadowConstantBuffer.reset();
         m_sceneColorTarget.reset();
         m_sceneDepthTarget.reset();
+        m_previewColorTarget.reset();
+        m_previewDepthTarget.reset();
         if (m_debugRenderer)
         {
             m_debugRenderer->Shutdown();
@@ -367,10 +369,37 @@ namespace Engine::Renderer
         const float aspectRatio = m_height == 0 ? 1.0f : static_cast<float>(m_width) / static_cast<float>(m_height);
         Scene::DirectionalLight fallbackLight;
         const Scene::DirectionalLight& light = m_directionalLight ? *m_directionalLight : fallbackLight;
+        Math::Vector3 ambientColor = m_ambientColor;
 
         DirectX::XMStoreFloat4x4(&transformData.world, transform.GetWorldMatrix());
         DirectX::XMStoreFloat4x4(&transformData.view, camera.GetViewMatrix());
         DirectX::XMStoreFloat4x4(&transformData.projection, camera.GetProjectionMatrix(aspectRatio));
+        DrawMeshWithMatrices(mesh, material, transform, transformData.view, transformData.projection);
+    }
+
+    void Renderer::DrawMeshWithMatrices(const Mesh& mesh, const Material& material, const Math::Transform& transform, const Math::Matrix4x4& view, const Math::Matrix4x4& projection)
+    {
+        if (!m_device || !mesh.GetVertexBuffer() || !mesh.GetIndexBuffer() || !m_transformConstantBuffer || !m_materialConstantBuffer || !m_lightConstantBuffer || !m_shadowConstantBuffer)
+        {
+            return;
+        }
+
+        if (!material.GetVertexShader() || !material.GetPixelShader())
+        {
+            return;
+        }
+
+        TransformBufferData transformData = {};
+        MaterialBufferData materialData = {};
+        LightBufferData lightData = {};
+        ShadowBufferData shadowData = {};
+        Scene::DirectionalLight fallbackLight;
+        const Scene::DirectionalLight& light = m_directionalLight ? *m_directionalLight : fallbackLight;
+        Math::Vector3 ambientColor = m_ambientColor;
+
+        DirectX::XMStoreFloat4x4(&transformData.world, transform.GetWorldMatrix());
+        transformData.view = view;
+        transformData.projection = projection;
         materialData.baseColor = material.GetBaseColor();
         materialData.useBaseColorTexture = material.GetBaseColorTexture() ? 1 : 0;
         materialData.useRoughnessTexture = material.GetRoughnessTexture() ? 1 : 0;
@@ -389,7 +418,7 @@ namespace Engine::Renderer
             fallback.intensity = light.intensity;
             lightData.lights[0] = fallback;
             lightCount = 1;
-            m_ambientColor = light.ambientColor;
+            ambientColor = light.ambientColor;
         }
         else
         {
@@ -399,7 +428,7 @@ namespace Engine::Renderer
             }
         }
         lightData.lightCount = lightCount;
-        lightData.ambientColor = { m_ambientColor.x, m_ambientColor.y, m_ambientColor.z, 1.0f };
+        lightData.ambientColor = { ambientColor.x, ambientColor.y, ambientColor.z, 1.0f };
         if (m_shadowMap && m_shadowMap->IsReady())
         {
             shadowData.lightView = m_shadowMap->GetLightView();
@@ -584,16 +613,27 @@ namespace Engine::Renderer
         // Draw editor gizmos on top of scene geometry so nearby objects do not hide them.
         m_device->GetContext().ClearDepthStencil(1.0f, 0);
 
-        constexpr float axisLength = 1.5f;
-        constexpr float boxSize = 0.18f;
-        constexpr float ringRadius = 1.15f;
+        const DirectX::XMVECTOR cameraPosition = DirectX::XMLoadFloat3(&camera.position);
+        const DirectX::XMVECTOR objectPosition = DirectX::XMLoadFloat3(&origin);
+        const float cameraDistance = std::max(0.1f, DirectX::XMVectorGetX(DirectX::XMVector3Length(DirectX::XMVectorSubtract(objectPosition, cameraPosition))));
+        const float gizmoScale = std::clamp(cameraDistance * 0.18f, 0.35f, 20.0f);
+        const float axisLength = mode == GizmoVisualMode::Rotate ? gizmoScale : 1.5f;
+        const float boxSize = 0.18f;
+        const float ringRadius = gizmoScale;
 
-        const Math::Vector3 axes[] =
+        const Math::Vector3 localAxes[] =
         {
             RotateAxis(transform.rotation, { 1.0f, 0.0f, 0.0f }),
             RotateAxis(transform.rotation, { 0.0f, 1.0f, 0.0f }),
             RotateAxis(transform.rotation, { 0.0f, 0.0f, 1.0f })
         };
+        const Math::Vector3 worldAxes[] =
+        {
+            { 1.0f, 0.0f, 0.0f },
+            { 0.0f, 1.0f, 0.0f },
+            { 0.0f, 0.0f, 1.0f }
+        };
+        const Math::Vector3* axes = mode == GizmoVisualMode::Rotate ? worldAxes : localAxes;
         const Math::Vector4 colors[] =
         {
             { 1.0f, 0.1f, 0.1f, 1.0f },
@@ -654,6 +694,58 @@ namespace Engine::Renderer
         context.SetViewport(viewport);
         m_postProcessStack->Apply(context, m_sceneColorTarget);
         context.SetTexture(RHI::ShaderStage::Pixel, 0, nullptr);
+    }
+
+    void* Renderer::RenderStaticMeshPreview(const Mesh& mesh, std::uint32_t width, std::uint32_t height, const Math::Matrix4x4& view, const Math::Matrix4x4& projection)
+    {
+        if (!m_device || !m_defaultMaterial || width == 0 || height == 0)
+        {
+            return nullptr;
+        }
+
+        if (!m_previewColorTarget || !m_previewDepthTarget || m_previewWidth != width || m_previewHeight != height)
+        {
+            m_previewColorTarget = m_device->CreateRenderTarget(width, height, RHI::TextureFormat::RGBA8);
+            m_previewDepthTarget = m_device->CreateDepthTarget(width, height, RHI::TextureFormat::D24S8, false);
+            m_previewWidth = width;
+            m_previewHeight = height;
+            if (!m_previewColorTarget || !m_previewDepthTarget)
+            {
+                Core::Log::Error("Failed to create static mesh preview render target.");
+                return nullptr;
+            }
+        }
+
+        RHI::RHIContext& context = m_device->GetContext();
+        context.SetTexture(RHI::ShaderStage::Pixel, 0, nullptr);
+        context.SetTexture(RHI::ShaderStage::Pixel, 1, nullptr);
+        context.SetTexture(RHI::ShaderStage::Pixel, 2, nullptr);
+        context.SetTexture(RHI::ShaderStage::Pixel, 3, nullptr);
+        context.SetTexture(RHI::ShaderStage::Pixel, 4, nullptr);
+        context.SetRenderTarget(m_previewColorTarget, m_previewDepthTarget);
+
+        RHI::ViewportDesc previewViewport;
+        previewViewport.width = static_cast<float>(width);
+        previewViewport.height = static_cast<float>(height);
+        previewViewport.minDepth = 0.0f;
+        previewViewport.maxDepth = 1.0f;
+        context.SetViewport(previewViewport);
+        context.ClearRenderTarget(0.035f, 0.038f, 0.045f, 1.0f);
+        context.ClearDepthStencil(1.0f, 0);
+
+        Math::Transform identity;
+        DrawMeshWithMatrices(mesh, *m_defaultMaterial, identity, view, projection);
+
+        context.SetTexture(RHI::ShaderStage::Pixel, 0, nullptr);
+        context.SetDefaultRenderTarget();
+        RHI::ViewportDesc mainViewport;
+        mainViewport.width = static_cast<float>(m_width);
+        mainViewport.height = static_cast<float>(m_height);
+        mainViewport.minDepth = 0.0f;
+        mainViewport.maxDepth = 1.0f;
+        context.SetViewport(mainViewport);
+
+        return m_previewColorTarget->GetNativeShaderResourceHandleForUI();
     }
 
     void Renderer::SetPostProcessSettings(const PostProcessSettings& settings)

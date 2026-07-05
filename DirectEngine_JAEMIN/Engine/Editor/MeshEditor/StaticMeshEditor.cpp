@@ -94,7 +94,11 @@ namespace Engine::Editor
         }
 
         m_previewViewport.SetMesh(m_mesh);
-        LoadColliderAsset();
+        if (LoadColliderAsset())
+        {
+            m_showCollider = true;
+            m_previewViewport.SetShowCollider(true);
+        }
         SyncCollidersToPreview();
         Core::Log::Info("Opened Static Mesh Editor: " + ToNarrowAscii(m_meshPath));
         return true;
@@ -120,7 +124,11 @@ namespace Engine::Editor
         }
 
         m_previewViewport.SetMesh(m_mesh);
-        LoadColliderAsset();
+        if (LoadColliderAsset())
+        {
+            m_showCollider = true;
+            m_previewViewport.SetShowCollider(true);
+        }
         SyncCollidersToPreview();
         Core::Log::Info("Opened Static Mesh Editor by path: " + ToNarrowAscii(m_meshPath));
         return true;
@@ -141,7 +149,7 @@ namespace Engine::Editor
         m_previewViewport.Update(deltaTime);
     }
 
-    void StaticMeshEditor::OnImGuiRender()
+    void StaticMeshEditor::OnImGuiRender(Renderer::Renderer& renderer)
     {
         if (!m_isOpen)
         {
@@ -165,8 +173,16 @@ namespace Engine::Editor
         }
 
         ImGui::Columns(2, "StaticMeshEditorColumns", true);
-        ImGui::SetColumnWidth(0, ImGui::GetWindowWidth() - 330.0f);
-        m_previewViewport.DrawImGuiViewport();
+        const float detailsWidth = std::clamp(ImGui::GetWindowWidth() * 0.36f, 360.0f, 520.0f);
+        ImGui::SetColumnWidth(0, std::max(320.0f, ImGui::GetWindowWidth() - detailsWidth));
+        m_previewViewport.SetSelectedColliderIndex(m_selectedColliderIndex);
+        m_previewViewport.SetGizmoMode(m_colliderGizmoMode);
+        if (m_previewViewport.DrawImGuiViewport(renderer, m_colliders, m_selectedColliderIndex))
+        {
+            m_showCollider = true;
+            m_previewViewport.SetShowCollider(true);
+            SyncCollidersToPreview();
+        }
         ImGui::NextColumn();
         DrawDetailsPanel();
         ImGui::Separator();
@@ -194,7 +210,7 @@ namespace Engine::Editor
         {
             m_previewViewport.ResetCamera();
         }
-        ImGui::SameLine();
+        ImGui::NewLine();
         if (ImGui::Checkbox("Grid", &m_showGrid))
         {
             m_previewViewport.SetShowGrid(m_showGrid);
@@ -219,8 +235,8 @@ namespace Engine::Editor
     void StaticMeshEditor::DrawDetailsPanel()
     {
         ImGui::SeparatorText("Asset");
-        ImGui::Text("Static Mesh: %s", m_meshPath.empty() ? "(none)" : m_meshPath.filename().string().c_str());
-        ImGui::Text("GUID: %s", m_meshGuid.empty() ? "(none)" : m_meshGuid.c_str());
+        ImGui::TextWrapped("Static Mesh: %s", m_meshPath.empty() ? "(none)" : m_meshPath.filename().string().c_str());
+        ImGui::TextWrapped("GUID: %s", m_meshGuid.empty() ? "(none)" : m_meshGuid.c_str());
         ImGui::TextWrapped("Path: %s", m_meshPath.empty() ? "(none)" : ToNarrowAscii(m_meshPath).c_str());
 
         ImGui::SeparatorText("Mesh Info");
@@ -273,8 +289,8 @@ namespace Engine::Editor
         {
             ImGui::PushID(static_cast<int>(i));
             ImGui::Text("Slot %u", static_cast<unsigned>(i));
-            ImGui::Text("Name: %s", slots[i].name.c_str());
-            ImGui::Text("Material: %s", slots[i].materialGuid.empty() ? "None" : slots[i].materialGuid.c_str());
+            ImGui::TextWrapped("Name: %s", slots[i].name.c_str());
+            ImGui::TextWrapped("Material: %s", slots[i].materialGuid.empty() ? "None" : slots[i].materialGuid.c_str());
             ImGui::PopID();
         }
 
@@ -317,7 +333,6 @@ namespace Engine::Editor
             m_selectedColliderIndex = static_cast<int>(m_colliders.size()) - 1;
             changed = true;
         }
-        ImGui::SameLine();
         if (m_selectedColliderIndex >= 0 && ImGui::Button("Delete Collider"))
         {
             const std::size_t index = static_cast<std::size_t>(m_selectedColliderIndex);
@@ -341,9 +356,26 @@ namespace Engine::Editor
 
         if (m_colliders.empty())
         {
-            ImGui::TextDisabled("No collider data. Add Box or Sphere to create a reusable setup.");
+            ImGui::TextWrapped("No collider data. Add Box or Sphere to create a reusable setup.");
             return;
         }
+
+        ImGui::SeparatorText("Gizmo");
+        if (ImGui::RadioButton("Move", m_colliderGizmoMode == ColliderGizmoMode::Move))
+        {
+            m_colliderGizmoMode = ColliderGizmoMode::Move;
+        }
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Rotate", m_colliderGizmoMode == ColliderGizmoMode::Rotate))
+        {
+            m_colliderGizmoMode = ColliderGizmoMode::Rotate;
+        }
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Scale", m_colliderGizmoMode == ColliderGizmoMode::Scale))
+        {
+            m_colliderGizmoMode = ColliderGizmoMode::Scale;
+        }
+        m_previewViewport.SetGizmoMode(m_colliderGizmoMode);
 
         if (ImGui::BeginTable("StaticMeshColliderTable", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV))
         {
@@ -359,6 +391,7 @@ namespace Engine::Editor
                 if (ImGui::Selectable(label.c_str(), m_selectedColliderIndex == static_cast<int>(i)))
                 {
                     m_selectedColliderIndex = static_cast<int>(i);
+                    m_previewViewport.SetSelectedColliderIndex(m_selectedColliderIndex);
                 }
                 ImGui::PopID();
             }
@@ -375,6 +408,22 @@ namespace Engine::Editor
                     changed = true;
                 }
                 changed = DragFloat3("Center", collider.center) || changed;
+                Math::Vector3 rotationDegrees =
+                {
+                    DirectX::XMConvertToDegrees(collider.rotation.x),
+                    DirectX::XMConvertToDegrees(collider.rotation.y),
+                    DirectX::XMConvertToDegrees(collider.rotation.z)
+                };
+                if (DragFloat3("Rotation (deg)", rotationDegrees, 1.0f, -3600.0f, 3600.0f))
+                {
+                    collider.rotation =
+                    {
+                        DirectX::XMConvertToRadians(rotationDegrees.x),
+                        DirectX::XMConvertToRadians(rotationDegrees.y),
+                        DirectX::XMConvertToRadians(rotationDegrees.z)
+                    };
+                    changed = true;
+                }
                 changed = DragFloat3("Size", collider.size, 0.05f, 0.01f, 1000.0f) || changed;
                 changed = ImGui::DragFloat("Radius", &collider.radius, 0.05f, 0.01f, 1000.0f, "%.3f") || changed;
                 changed = ImGui::Checkbox("Is Trigger", &collider.isTrigger) || changed;
@@ -444,7 +493,7 @@ namespace Engine::Editor
                 {
                     current.type = value == "Sphere" ? Physics::ColliderType::Sphere : Physics::ColliderType::AABB;
                 }
-                else if (key == "center" || key == "size")
+                else if (key == "center" || key == "size" || key == "rotation")
                 {
                     std::stringstream stream(value);
                     std::string part;
@@ -456,6 +505,15 @@ namespace Engine::Editor
                     if (key == "center")
                     {
                         current.center = { values[0], values[1], values[2] };
+                    }
+                    else if (key == "rotation")
+                    {
+                        current.rotation =
+                        {
+                            DirectX::XMConvertToRadians(values[0]),
+                            DirectX::XMConvertToRadians(values[1]),
+                            DirectX::XMConvertToRadians(values[2])
+                        };
                     }
                     else
                     {
@@ -505,6 +563,7 @@ namespace Engine::Editor
             file << "[Collider]\n";
             file << "type=" << ToColliderTypeName(collider.type) << "\n";
             file << "center=" << collider.center.x << "," << collider.center.y << "," << collider.center.z << "\n";
+            file << "rotation=" << DirectX::XMConvertToDegrees(collider.rotation.x) << "," << DirectX::XMConvertToDegrees(collider.rotation.y) << "," << DirectX::XMConvertToDegrees(collider.rotation.z) << "\n";
             file << "size=" << collider.size.x << "," << collider.size.y << "," << collider.size.z << "\n";
             file << "radius=" << collider.radius << "\n";
             file << "is_trigger=" << (collider.isTrigger ? "true" : "false") << "\n\n";
@@ -515,6 +574,7 @@ namespace Engine::Editor
     void StaticMeshEditor::SyncCollidersToPreview()
     {
         m_previewViewport.SetColliders(m_colliders);
+        m_previewViewport.SetSelectedColliderIndex(m_selectedColliderIndex);
     }
 
     void StaticMeshEditor::SetError(const std::string& error)

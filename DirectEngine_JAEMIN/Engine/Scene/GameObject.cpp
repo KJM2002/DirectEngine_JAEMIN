@@ -19,6 +19,16 @@ namespace Engine::Scene
         m_name = std::move(name);
     }
 
+    const std::string& GameObject::GetOutlinerFolder() const
+    {
+        return m_outlinerFolder;
+    }
+
+    void GameObject::SetOutlinerFolder(std::string folder)
+    {
+        m_outlinerFolder = std::move(folder);
+    }
+
     Math::Transform& GameObject::GetTransform()
     {
         return m_transform;
