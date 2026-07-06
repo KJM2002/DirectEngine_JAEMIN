@@ -18,6 +18,7 @@ namespace Engine::Renderer
             Math::Vector3 normal;
             Math::Vector4 color;
             Math::Vector2 uv;
+            Math::Vector3 tangent;
         };
 
         struct PostProcessBufferData
@@ -42,10 +43,10 @@ namespace Engine::Renderer
     {
         const PostProcessVertex vertices[] =
         {
-            { { -1.0f, -1.0f, 0.0f }, {}, { 1.0f, 1.0f, 1.0f, 1.0f }, { 0.0f, 1.0f } },
-            { { -1.0f,  1.0f, 0.0f }, {}, { 1.0f, 1.0f, 1.0f, 1.0f }, { 0.0f, 0.0f } },
-            { {  1.0f,  1.0f, 0.0f }, {}, { 1.0f, 1.0f, 1.0f, 1.0f }, { 1.0f, 0.0f } },
-            { {  1.0f, -1.0f, 0.0f }, {}, { 1.0f, 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f } }
+            { { -1.0f, -1.0f, 0.0f }, {}, { 1.0f, 1.0f, 1.0f, 1.0f }, { 0.0f, 1.0f }, {} },
+            { { -1.0f,  1.0f, 0.0f }, {}, { 1.0f, 1.0f, 1.0f, 1.0f }, { 0.0f, 0.0f }, {} },
+            { {  1.0f,  1.0f, 0.0f }, {}, { 1.0f, 1.0f, 1.0f, 1.0f }, { 1.0f, 0.0f }, {} },
+            { {  1.0f, -1.0f, 0.0f }, {}, { 1.0f, 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f }, {} }
         };
         const std::uint32_t indices[] = { 0, 1, 2, 0, 2, 3 };
 

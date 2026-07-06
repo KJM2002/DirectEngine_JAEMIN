@@ -36,6 +36,7 @@ namespace Engine::Scene
 namespace Engine::Renderer
 {
     enum class GizmoVisualMode;
+    class Material;
     class Renderer;
 }
 
@@ -95,6 +96,7 @@ namespace Engine::Editor
         void ApplyRendererSettings(Renderer::Renderer& renderer, const Scene::Scene& scene) const;
 
         Scene::GameObject* GetSelectedObject() const;
+        const std::vector<Scene::GameObject*>& GetSelectedObjects() const;
         bool IsPlayMode() const;
         bool WantsInputCapture() const;
         bool ShouldShowColliders() const;
@@ -144,9 +146,15 @@ namespace Engine::Editor
         int SaveReferencedMaterialAssets(const Scene::Scene& scene);
         bool SaveSelectedMaterialAs(const std::wstring& path);
         bool DeleteSelectedMaterialAsset(Scene::Scene& scene, Renderer::Renderer& renderer);
+        bool DeleteSelectedAssets(Scene::Scene& scene, Renderer::Renderer& renderer);
         bool ApplyTextureToSelectedMaterial(Renderer::Renderer& renderer, const std::wstring& texturePath);
         bool ApplyTextureToSelectedMaterial(Renderer::Renderer& renderer, const std::wstring& texturePath, MaterialTextureSlot slot);
+        bool ApplyTextureToMaterial(Renderer::Renderer& renderer, Renderer::Material& material, const std::wstring& texturePath, MaterialTextureSlot slot);
         bool ClearSelectedMaterialTextureSlot(MaterialTextureSlot slot);
+        bool ClearMaterialTextureSlot(Renderer::Material& material, MaterialTextureSlot slot);
+        void OpenMaterialEditor(Renderer::Renderer& renderer, const std::wstring& materialAsset);
+        void RenderMaterialEditor(Renderer::Renderer& renderer);
+        bool SaveMaterialEditor();
         void OpenModelEditor(const std::wstring& modelAsset);
         void RenderModelEditor(Scene::Scene& scene, Renderer::Renderer& renderer);
         bool LoadModelColliderAsset(const std::wstring& modelAsset);
@@ -229,6 +237,10 @@ namespace Engine::Editor
         std::wstring m_modelEditorAsset;
         std::vector<ModelColliderEntry> m_modelEditorColliders;
         int m_selectedModelColliderIndex = -1;
+        bool m_showMaterialEditor = false;
+        std::wstring m_materialEditorAsset;
+        std::shared_ptr<Renderer::Material> m_materialEditorMaterial;
+        bool m_materialEditorDirty = false;
         std::wstring m_selectedAssetFolder = L"Assets";
         std::wstring m_currentSceneAsset = L"Assets/Scenes/Test.scene";
         std::wstring m_selectedAsset;

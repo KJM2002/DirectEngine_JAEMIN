@@ -4,6 +4,7 @@ struct VSInput
     float3 normal : NORMAL;
     float4 color : COLOR;
     float2 uv : TEXCOORD;
+    float3 tangent : TANGENT;
 };
 
 struct VSOutput

@@ -2,6 +2,7 @@ struct PSInput
 {
     float4 position : SV_POSITION;
     float3 normal : NORMAL;
+    float3 tangent : TANGENT;
     float3 worldPosition : TEXCOORD1;
     float4 shadowPosition : TEXCOORD2;
     float4 color : COLOR;
@@ -19,6 +20,8 @@ cbuffer MaterialBuffer : register(b1)
     float Metallic;
     float MaterialPadding0;
     float MaterialPadding1;
+    float3 CameraPosition;
+    float MaterialPadding2;
 };
 
 cbuffer LightBuffer : register(b2)
@@ -36,6 +39,9 @@ SamplerComparisonState ShadowSampler : register(s1);
 Texture2D RoughnessTexture : register(t2);
 Texture2D MetallicTexture : register(t3);
 Texture2D NormalTexture : register(t4);
+SamplerState RoughnessSampler : register(s2);
+SamplerState MetallicSampler : register(s3);
+SamplerState NormalSampler : register(s4);
 
 cbuffer ShadowBuffer : register(b3)
 {
@@ -43,6 +49,8 @@ cbuffer ShadowBuffer : register(b3)
     row_major float4x4 LightProjection;
     float4 ShadowParams;
 };
+
+static const float PI = 3.14159265f;
 
 float CalculateShadow(float4 shadowPosition)
 {
@@ -62,11 +70,70 @@ float CalculateShadow(float4 shadowPosition)
     return ShadowMapTexture.SampleCmpLevelZero(ShadowSampler, uv, depth);
 }
 
-float4 main(PSInput input) : SV_TARGET
+float DistributionGGX(float3 normal, float3 halfway, float roughness)
+{
+    float a = roughness * roughness;
+    float a2 = a * a;
+    float nDotH = saturate(dot(normal, halfway));
+    float nDotH2 = nDotH * nDotH;
+    float denom = nDotH2 * (a2 - 1.0f) + 1.0f;
+    return a2 / max(PI * denom * denom, 0.000001f);
+}
+
+float GeometrySchlickGGX(float nDotV, float roughness)
+{
+    float r = roughness + 1.0f;
+    float k = (r * r) / 8.0f;
+    return nDotV / max(nDotV * (1.0f - k) + k, 0.000001f);
+}
+
+float GeometrySmith(float3 normal, float3 viewDirection, float3 lightDirection, float roughness)
+{
+    float nDotV = saturate(dot(normal, viewDirection));
+    float nDotL = saturate(dot(normal, lightDirection));
+    return GeometrySchlickGGX(nDotV, roughness) * GeometrySchlickGGX(nDotL, roughness);
+}
+
+float3 FresnelSchlick(float cosTheta, float3 f0)
+{
+    return f0 + (1.0f - f0) * pow(saturate(1.0f - cosTheta), 5.0f);
+}
+
+float3 ResolveNormal(PSInput input)
 {
     float3 normal = normalize(input.normal);
-    float3 lighting = AmbientColor.rgb;
+    if (UseNormalTexture == 0)
+    {
+        return normal;
+    }
+
+    float3 tangent = normalize(input.tangent - normal * dot(input.tangent, normal));
+    if (dot(tangent, tangent) < 0.0001f)
+    {
+        return normal;
+    }
+
+    float3 bitangent = normalize(cross(normal, tangent));
+    float3 tangentNormal = NormalTexture.Sample(NormalSampler, input.uv).xyz * 2.0f - 1.0f;
+    tangentNormal = normalize(tangentNormal);
+    return normalize(tangentNormal.x * tangent + tangentNormal.y * bitangent + tangentNormal.z * normal);
+}
+
+float4 main(PSInput input) : SV_TARGET
+{
+    float3 normal = ResolveNormal(input);
+    float3 viewDirection = normalize(CameraPosition - input.worldPosition);
     float shadow = CalculateShadow(input.shadowPosition);
+
+    float4 textureColor = UseBaseColorTexture != 0 ? DiffuseTexture.Sample(DiffuseSampler, input.uv) : float4(1.0f, 1.0f, 1.0f, 1.0f);
+    float4 baseColor = input.color * BaseColor * textureColor;
+    float3 albedo = saturate(baseColor.rgb);
+    float roughness = saturate(UseRoughnessTexture != 0 ? RoughnessTexture.Sample(RoughnessSampler, input.uv).r : Roughness);
+    float metallic = saturate(UseMetallicTexture != 0 ? MetallicTexture.Sample(MetallicSampler, input.uv).r : Metallic);
+    roughness = max(roughness, 0.045f);
+
+    float3 f0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);
+    float3 directLighting = float3(0.0f, 0.0f, 0.0f);
 
     [loop]
     for (uint i = 0; i < LightCount; ++i)
@@ -103,16 +170,20 @@ float4 main(PSInput input) : SV_TARGET
             }
         }
 
-        float diffuseAmount = saturate(dot(normal, lightDirection));
-        lighting += lightColor * diffuseAmount * attenuation * shadow;
+        float3 halfway = normalize(viewDirection + lightDirection);
+        float nDotL = saturate(dot(normal, lightDirection));
+        float nDotV = saturate(dot(normal, viewDirection));
+        float hDotV = saturate(dot(halfway, viewDirection));
+
+        float ndf = DistributionGGX(normal, halfway, roughness);
+        float geometry = GeometrySmith(normal, viewDirection, lightDirection, roughness);
+        float3 fresnel = FresnelSchlick(hDotV, f0);
+        float3 specular = (ndf * geometry * fresnel) / max(4.0f * nDotV * nDotL, 0.0001f);
+        float3 diffuse = (1.0f - fresnel) * (1.0f - metallic) * albedo / PI;
+        directLighting += (diffuse + specular) * lightColor * attenuation * nDotL * shadow;
     }
 
-    float roughness = UseRoughnessTexture != 0 ? RoughnessTexture.Sample(DiffuseSampler, input.uv).r : Roughness;
-    float metallic = UseMetallicTexture != 0 ? MetallicTexture.Sample(DiffuseSampler, input.uv).r : Metallic;
-    lighting *= lerp(1.15f, 0.75f, saturate(roughness));
-
-    float4 textureColor = UseBaseColorTexture != 0 ? DiffuseTexture.Sample(DiffuseSampler, input.uv) : float4(1.0f, 1.0f, 1.0f, 1.0f);
-    float4 albedo = input.color * BaseColor * textureColor;
-    float3 finalColor = lerp(albedo.rgb * lighting, albedo.rgb * (lighting * 0.45f + 0.55f), saturate(metallic));
-    return float4(finalColor, albedo.a);
+    float3 ambient = AmbientColor.rgb * albedo * (1.0f - metallic);
+    float3 finalColor = ambient + directLighting;
+    return float4(saturate(finalColor), baseColor.a);
 }

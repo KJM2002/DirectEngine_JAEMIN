@@ -774,6 +774,13 @@ namespace Engine::Editor
             }
         }
 
+        Resource::TextureLoadOptions MakeTextureLoadOptions(MaterialTextureSlot slot)
+        {
+            Resource::TextureLoadOptions options;
+            options.sRGB = slot == MaterialTextureSlot::BaseColor;
+            return options;
+        }
+
         const std::wstring& GetMaterialTextureSlotPath(const Renderer::Material& material, MaterialTextureSlot slot)
         {
             switch (slot)
@@ -826,6 +833,11 @@ namespace Engine::Editor
         {
             const std::filesystem::path path(asset);
             return HasExtension(path, { L".obj", L".mat", L".scene", L".png", L".jpg", L".jpeg", L".bmp", L".tga" });
+        }
+
+        std::wstring NormalizeAssetPath(const std::wstring& path)
+        {
+            return std::filesystem::path(path).lexically_normal().generic_wstring();
         }
 
         std::shared_ptr<Renderer::Material> CloneMaterialInstance(const Renderer::Material& source)
@@ -1055,11 +1067,12 @@ namespace Engine::Editor
                     SetSingleSelectedObject(hit.object);
                 }
             }
-        }
-
-        if (!m_selectedObject && !scene.GetGameObjects().empty())
-        {
-            SetSingleSelectedObject(scene.GetGameObjects().front().get());
+            else if (!io.KeyShift)
+            {
+                SetSingleSelectedObject(nullptr);
+                m_outlinerSelectionAnchor = nullptr;
+                m_activeGizmoAxis = GizmoAxis::None;
+            }
         }
     }
 
@@ -1544,10 +1557,129 @@ namespace Engine::Editor
                 m_inspectorTransformObject = nullptr;
             }
 
+            auto applyInspectorSnapshotEdit = [&](const GameObjectSnapshot& before, const GameObjectSnapshot& after, const char* notification)
+            {
+                if (!m_selectedObject || !GameObjectSnapshot::IsDifferent(before, after))
+                {
+                    return false;
+                }
+
+                m_inspectorEditObject = nullptr;
+                m_inspectorTransformObject = nullptr;
+                if (m_commandManager)
+                {
+                    m_commandManager->ExecuteCommand(std::make_unique<InspectorEditCommand>(*m_selectedObject, before, after));
+                }
+                else
+                {
+                    after.ApplyTo(*m_selectedObject);
+                }
+                scene.MarkDirty();
+                ShowNotification(notification);
+                return true;
+            };
+
+            auto addMeshRendererComponent = [&]()
+            {
+                GameObjectSnapshot before = GameObjectSnapshot::Capture(*m_selectedObject);
+                GameObjectSnapshot after = before;
+                after.meshRenderer = MeshRendererSnapshot{};
+                after.meshRenderer.enabled = true;
+                after.meshRenderer.mesh = renderer.GetResourceManager().CreateCubeMesh("builtin:mesh:cube");
+                after.meshRenderer.material = renderer.GetResourceManager().CreateMaterial("editor:material:default", { 1.0f, 1.0f, 1.0f, 1.0f });
+                after.meshRenderer.meshPath = L"builtin:mesh:cube";
+                after.meshRenderer.materialPath = L"editor:material:default";
+                after.meshRenderer.hasMaterialState = true;
+                after.meshRenderer.materialBaseColor = { 1.0f, 1.0f, 1.0f, 1.0f };
+                after.meshRenderer.materialRoughness = 0.5f;
+                after.meshRenderer.materialMetallic = 0.0f;
+                applyInspectorSnapshotEdit(before, after, "Added Mesh Renderer.");
+            };
+
+            auto addColliderComponent = [&]()
+            {
+                GameObjectSnapshot before = GameObjectSnapshot::Capture(*m_selectedObject);
+                GameObjectSnapshot after = before;
+                after.colliders.push_back(ColliderSnapshot{});
+                applyInspectorSnapshotEdit(before, after, "Added Collider.");
+            };
+
+            auto addLightComponent = [&]()
+            {
+                GameObjectSnapshot before = GameObjectSnapshot::Capture(*m_selectedObject);
+                GameObjectSnapshot after = before;
+                after.light.enabled = true;
+                applyInspectorSnapshotEdit(before, after, "Added Light.");
+            };
+
+            auto addPostProcessComponent = [&]()
+            {
+                GameObjectSnapshot before = GameObjectSnapshot::Capture(*m_selectedObject);
+                GameObjectSnapshot after = before;
+                after.postProcess.enabledComponent = true;
+                after.postProcess.enabled = true;
+                applyInspectorSnapshotEdit(before, after, "Added Post Process.");
+            };
+
+            auto addPlayerStartComponent = [&]()
+            {
+                GameObjectSnapshot before = GameObjectSnapshot::Capture(*m_selectedObject);
+                GameObjectSnapshot after = before;
+                after.playerStart.enabled = true;
+                applyInspectorSnapshotEdit(before, after, "Added Player Start.");
+            };
+
+            auto drawComponentHeader = [](const char* label, const char* id)
+            {
+                ImGui::Separator();
+                ImGui::TextUnformatted(label);
+                ImGui::SameLine();
+                const std::string buttonId = std::string("Remove##") + id;
+                return ImGui::SmallButton(buttonId.c_str());
+            };
+
+            ImGui::Separator();
+            if (ImGui::Button("Add Component"))
+            {
+                ImGui::OpenPopup("AddComponentMenu");
+            }
+            if (ImGui::BeginPopup("AddComponentMenu"))
+            {
+                if (ImGui::MenuItem("Mesh Renderer", nullptr, false, m_selectedObject->GetComponent<Scene::MeshRendererComponent>() == nullptr))
+                {
+                    addMeshRendererComponent();
+                }
+                if (ImGui::MenuItem("Collider", nullptr, false, m_selectedObject->GetComponent<Physics::ColliderComponent>() == nullptr))
+                {
+                    addColliderComponent();
+                }
+                if (ImGui::MenuItem("Light", nullptr, false, m_selectedObject->GetComponent<Scene::LightComponent>() == nullptr))
+                {
+                    addLightComponent();
+                }
+                if (ImGui::MenuItem("Post Process", nullptr, false, m_selectedObject->GetComponent<Scene::PostProcessComponent>() == nullptr))
+                {
+                    addPostProcessComponent();
+                }
+                if (ImGui::MenuItem("Player Start", nullptr, false, m_selectedObject->GetComponent<Scene::PlayerStartComponent>() == nullptr))
+                {
+                    addPlayerStartComponent();
+                }
+                ImGui::EndPopup();
+            }
+
             bool inspectorEditChanged = false;
             if (Scene::MeshRendererComponent* meshRenderer = m_selectedObject->GetComponent<Scene::MeshRendererComponent>())
             {
-                ImGui::SeparatorText("Mesh Renderer");
+                if (drawComponentHeader("Mesh Renderer", "MeshRenderer"))
+                {
+                    GameObjectSnapshot before = GameObjectSnapshot::Capture(*m_selectedObject);
+                    GameObjectSnapshot after = before;
+                    after.meshRenderer = MeshRendererSnapshot{};
+                    applyInspectorSnapshotEdit(before, after, "Removed Mesh Renderer.");
+                }
+                else
+                {
                 const std::string meshPath = ToNarrowAscii(meshRenderer->GetMeshPath());
                 const std::string materialPath = ToNarrowAscii(meshRenderer->GetMaterialPath());
                 ImGui::Text("Mesh: %s", meshPath.empty() ? "(runtime)" : meshPath.c_str());
@@ -1633,11 +1765,20 @@ namespace Engine::Editor
                         SaveSelectedMaterialAs(MakeMaterialAssetPath(m_saveMaterialAsBuffer.data()));
                     }
                 }
+                }
             }
 
             if (Scene::LightComponent* light = m_selectedObject->GetComponent<Scene::LightComponent>())
             {
-                ImGui::SeparatorText("Light");
+                if (drawComponentHeader("Light", "Light"))
+                {
+                    GameObjectSnapshot before = GameObjectSnapshot::Capture(*m_selectedObject);
+                    GameObjectSnapshot after = before;
+                    after.light = LightSnapshot{};
+                    applyInspectorSnapshotEdit(before, after, "Removed Light.");
+                }
+                else
+                {
                 const char* items[] = { "Directional", "Point", "Spot" };
                 int currentType = static_cast<int>(light->type);
                 if (ImGui::Combo("Type", &currentType, items, IM_ARRAYSIZE(items)))
@@ -1661,11 +1802,20 @@ namespace Engine::Editor
                 light->outerConeAngle = std::clamp(light->outerConeAngle, 0.0f, 179.0f);
                 light->ClampConeAngles();
                 ImGui::Text("Current: %s", ToLightTypeName(light->type));
+                }
             }
 
             if (Physics::ColliderComponent* collider = m_selectedObject->GetComponent<Physics::ColliderComponent>())
             {
-                ImGui::SeparatorText("Collider");
+                if (drawComponentHeader("Collider", "Collider"))
+                {
+                    GameObjectSnapshot before = GameObjectSnapshot::Capture(*m_selectedObject);
+                    GameObjectSnapshot after = before;
+                    after.colliders.clear();
+                    applyInspectorSnapshotEdit(before, after, "Removed Collider.");
+                }
+                else
+                {
                 const char* items[] = { "AABB", "Sphere" };
                 int currentType = collider->type == Physics::ColliderType::Sphere ? 1 : 0;
                 if (ImGui::Combo("Collider Type", &currentType, items, IM_ARRAYSIZE(items)))
@@ -1698,11 +1848,20 @@ namespace Engine::Editor
                 collider->radius = std::clamp(collider->radius, 0.01f, 1000.0f);
                 inspectorEditChanged = ImGui::Checkbox("Is Trigger", &collider->isTrigger) || inspectorEditChanged;
                 ImGui::Text("Current: %s", ToColliderTypeName(collider->type));
+                }
             }
 
             if (Scene::PostProcessComponent* postProcess = m_selectedObject->GetComponent<Scene::PostProcessComponent>())
             {
-                ImGui::SeparatorText("Post Process");
+                if (drawComponentHeader("Post Process", "PostProcess"))
+                {
+                    GameObjectSnapshot before = GameObjectSnapshot::Capture(*m_selectedObject);
+                    GameObjectSnapshot after = before;
+                    after.postProcess = PostProcessSnapshot{};
+                    applyInspectorSnapshotEdit(before, after, "Removed Post Process.");
+                }
+                else
+                {
                 inspectorEditChanged = ImGui::Checkbox("Enabled", &postProcess->enabled) || inspectorEditChanged;
                 if (postProcess->effect != Renderer::PostProcessEffect::None)
                 {
@@ -1738,11 +1897,20 @@ namespace Engine::Editor
                     inspectorEditChanged = SliderAndInputFloat("Saturation", &postProcess->saturation, 0.0f, 3.0f) || inspectorEditChanged;
                 }
                 ImGui::Text("Current: %s", ToPostProcessStackSummary(*postProcess));
+                }
             }
 
             if (Scene::PlayerStartComponent* playerStart = m_selectedObject->GetComponent<Scene::PlayerStartComponent>())
             {
-                ImGui::SeparatorText("Player Start");
+                if (drawComponentHeader("Player Start", "PlayerStart"))
+                {
+                    GameObjectSnapshot before = GameObjectSnapshot::Capture(*m_selectedObject);
+                    GameObjectSnapshot after = before;
+                    after.playerStart = PlayerStartSnapshot{};
+                    applyInspectorSnapshotEdit(before, after, "Removed Player Start.");
+                }
+                else
+                {
                 inspectorEditChanged = DragAndInputFloat("Player Height", &playerStart->playerHeight, 0.05f, 0.0f, 10.0f) || inspectorEditChanged;
                 inspectorEditChanged = DragAndInputFloat("Move Speed", &playerStart->moveSpeed, 0.05f, 0.0f, 100.0f) || inspectorEditChanged;
                 inspectorEditChanged = DragAndInputFloat("Fast Multiplier", &playerStart->fastMoveMultiplier, 0.05f, 1.0f, 20.0f) || inspectorEditChanged;
@@ -1752,6 +1920,7 @@ namespace Engine::Editor
                 playerStart->fastMoveMultiplier = std::clamp(playerStart->fastMoveMultiplier, 1.0f, 20.0f);
                 playerStart->mouseSensitivity = std::clamp(playerStart->mouseSensitivity, 0.0001f, 0.1f);
                 ImGui::TextUnformatted("Play Mode starts the first-person camera here.");
+                }
             }
 
             if (inspectorEditChanged && !m_inspectorEditObject)
@@ -1795,6 +1964,7 @@ namespace Engine::Editor
             RenderAssetBrowser(scene, renderer);
         }
         RenderModelEditor(scene, renderer);
+        RenderMaterialEditor(renderer);
         m_staticMeshEditor.OnImGuiRender(renderer);
 
         drawSplitter("##RightPanelSplitter",
@@ -2902,39 +3072,156 @@ namespace Engine::Editor
             return false;
         }
 
-        if (!HasExtension(std::filesystem::path(m_selectedMaterialAsset), { L".mat" }))
+        SetSingleSelectedAsset(m_selectedMaterialAsset);
+        return DeleteSelectedAssets(scene, renderer);
+    }
+
+    bool EditorLayer::DeleteSelectedAssets(Scene::Scene& scene, Renderer::Renderer& renderer)
+    {
+        std::vector<std::wstring> assetsToDelete = m_selectedAssets;
+        if (assetsToDelete.empty() && !m_selectedAsset.empty())
+        {
+            assetsToDelete.push_back(m_selectedAsset);
+        }
+
+        if (assetsToDelete.empty())
         {
             return false;
         }
 
-        std::error_code error;
-        const bool removed = std::filesystem::remove(m_selectedMaterialAsset, error);
-        if (!removed || error)
-        {
-            Core::Log::Error("Failed to delete material asset: " + ToNarrowAscii(m_selectedMaterialAsset));
-            return false;
-        }
+        std::sort(assetsToDelete.begin(), assetsToDelete.end());
+        assetsToDelete.erase(std::unique(assetsToDelete.begin(), assetsToDelete.end()), assetsToDelete.end());
 
-        for (const std::unique_ptr<Scene::GameObject>& object : scene.GetGameObjects())
+        int deletedCount = 0;
+        for (const std::wstring& asset : assetsToDelete)
         {
-            Scene::MeshRendererComponent* meshRenderer = object->GetComponent<Scene::MeshRendererComponent>();
-            if (meshRenderer && meshRenderer->GetMaterialPath() == m_selectedMaterialAsset)
+            if (asset.empty())
             {
-                meshRenderer->SetMaterial(nullptr);
-                meshRenderer->SetMaterialPath({});
+                continue;
             }
+
+            const std::filesystem::path path(asset);
+            const std::wstring normalizedAsset = NormalizeAssetPath(asset);
+            bool sceneReferencesChanged = false;
+
+            for (const std::unique_ptr<Scene::GameObject>& object : scene.GetGameObjects())
+            {
+                if (!object)
+                {
+                    continue;
+                }
+
+                Scene::MeshRendererComponent* meshRenderer = object->GetComponent<Scene::MeshRendererComponent>();
+                if (!meshRenderer)
+                {
+                    continue;
+                }
+
+                if (HasExtension(path, { L".mat" })
+                    && NormalizeAssetPath(meshRenderer->GetMaterialPath()) == normalizedAsset)
+                {
+                    meshRenderer->SetMaterial(nullptr);
+                    meshRenderer->SetMaterialPath({});
+                    meshRenderer->SetMaterialGuid({});
+                    sceneReferencesChanged = true;
+                }
+
+                if (HasExtension(path, { L".obj", L".gltf", L".glb", L".fbx" })
+                    && NormalizeAssetPath(meshRenderer->GetMeshPath()) == normalizedAsset)
+                {
+                    meshRenderer->SetMesh(nullptr);
+                    meshRenderer->SetMeshPath({});
+                    meshRenderer->SetMeshGuid({});
+                    sceneReferencesChanged = true;
+                }
+
+                if (HasExtension(path, { L".png", L".jpg", L".jpeg", L".bmp", L".tga" })
+                    && meshRenderer->GetMaterial())
+                {
+                    Renderer::Material& material = *meshRenderer->GetMaterial();
+                    const MaterialTextureSlot slots[] =
+                    {
+                        MaterialTextureSlot::BaseColor,
+                        MaterialTextureSlot::Roughness,
+                        MaterialTextureSlot::Metallic,
+                        MaterialTextureSlot::Normal
+                    };
+                    for (MaterialTextureSlot slot : slots)
+                    {
+                        if (NormalizeAssetPath(GetMaterialTextureSlotPath(material, slot)) == normalizedAsset)
+                        {
+                            sceneReferencesChanged = ClearMaterialTextureSlot(material, slot) || sceneReferencesChanged;
+                        }
+                    }
+                }
+            }
+
+            if (m_showMaterialEditor && NormalizeAssetPath(m_materialEditorAsset) == normalizedAsset)
+            {
+                m_showMaterialEditor = false;
+                m_materialEditorAsset.clear();
+                m_materialEditorMaterial.reset();
+                m_materialEditorDirty = false;
+            }
+            else if (m_materialEditorMaterial && HasExtension(path, { L".png", L".jpg", L".jpeg", L".bmp", L".tga" }))
+            {
+                const MaterialTextureSlot slots[] =
+                {
+                    MaterialTextureSlot::BaseColor,
+                    MaterialTextureSlot::Roughness,
+                    MaterialTextureSlot::Metallic,
+                    MaterialTextureSlot::Normal
+                };
+                for (MaterialTextureSlot slot : slots)
+                {
+                    if (NormalizeAssetPath(GetMaterialTextureSlotPath(*m_materialEditorMaterial, slot)) == normalizedAsset)
+                    {
+                        m_materialEditorDirty = ClearMaterialTextureSlot(*m_materialEditorMaterial, slot) || m_materialEditorDirty;
+                    }
+                }
+            }
+
+            if (HasExtension(path, { L".mat" }))
+            {
+                renderer.GetResourceManager().ForgetMaterial(asset);
+            }
+
+            if (m_currentSceneAsset == asset)
+            {
+                m_currentSceneAsset.clear();
+                scene.SetFilePath({});
+                sceneReferencesChanged = true;
+            }
+            if (m_selectedSceneAsset == asset)
+            {
+                m_selectedSceneAsset.clear();
+            }
+            if (m_selectedMaterialAsset == asset)
+            {
+                m_selectedMaterialAsset.clear();
+            }
+
+            if (!m_assetDatabase.DeleteAsset(path))
+            {
+                Core::Log::Error("Failed to delete asset: " + ToNarrowAscii(asset));
+                continue;
+            }
+
+            if (sceneReferencesChanged)
+            {
+                scene.MarkDirty();
+            }
+            ++deletedCount;
         }
 
-        renderer.GetResourceManager().ForgetMaterial(m_selectedMaterialAsset);
-        Core::Log::Info("Deleted material asset: " + ToNarrowAscii(m_selectedMaterialAsset));
-        if (m_selectedAsset == m_selectedMaterialAsset)
-        {
-            m_selectedAsset.clear();
-        }
-        m_selectedAssets.erase(std::remove(m_selectedAssets.begin(), m_selectedAssets.end(), m_selectedMaterialAsset), m_selectedAssets.end());
-        m_selectedMaterialAsset.clear();
+        m_selectedAsset.clear();
+        m_selectedAssets.clear();
         RefreshAssets();
-        return true;
+        if (deletedCount > 0)
+        {
+            ShowNotification("Deleted asset(s): " + std::to_string(deletedCount));
+        }
+        return deletedCount > 0;
     }
 
     bool EditorLayer::ApplyTextureToSelectedMaterial(Renderer::Renderer& renderer, const std::wstring& texturePath)
@@ -2954,9 +3241,8 @@ namespace Engine::Editor
             return false;
         }
 
-        Resource::ResourceManager& resources = renderer.GetResourceManager();
-        std::shared_ptr<RHI::RHITexture> texture = resources.LoadTexture(texturePath);
         bool applied = false;
+        Resource::ResourceManager& resources = renderer.GetResourceManager();
         for (Scene::GameObject* object : targets)
         {
             if (!object)
@@ -2983,27 +3269,7 @@ namespace Engine::Editor
                 continue;
             }
 
-            switch (slot)
-            {
-            case MaterialTextureSlot::Roughness:
-                meshRenderer->GetMaterial()->SetRoughnessTexture(texture);
-                meshRenderer->GetMaterial()->SetRoughnessTexturePath(texturePath);
-                break;
-            case MaterialTextureSlot::Metallic:
-                meshRenderer->GetMaterial()->SetMetallicTexture(texture);
-                meshRenderer->GetMaterial()->SetMetallicTexturePath(texturePath);
-                break;
-            case MaterialTextureSlot::Normal:
-                meshRenderer->GetMaterial()->SetNormalTexture(texture);
-                meshRenderer->GetMaterial()->SetNormalTexturePath(texturePath);
-                break;
-            case MaterialTextureSlot::BaseColor:
-            default:
-                meshRenderer->GetMaterial()->SetBaseColorTexture(texture);
-                meshRenderer->GetMaterial()->SetBaseColorTexturePath(texturePath);
-                break;
-            }
-            applied = true;
+            applied = ApplyTextureToMaterial(renderer, *meshRenderer->GetMaterial(), texturePath, slot) || applied;
         }
 
         if (applied)
@@ -3011,6 +3277,38 @@ namespace Engine::Editor
             Core::Log::Info(std::string("Applied ") + ToMaterialTextureSlotName(slot) + " texture: " + ToNarrowAscii(texturePath));
         }
         return applied;
+    }
+
+    bool EditorLayer::ApplyTextureToMaterial(Renderer::Renderer& renderer, Renderer::Material& material, const std::wstring& texturePath, MaterialTextureSlot slot)
+    {
+        std::shared_ptr<RHI::RHITexture> texture = renderer.GetResourceManager().LoadTexture(texturePath, MakeTextureLoadOptions(slot));
+        if (!texture)
+        {
+            return false;
+        }
+
+        switch (slot)
+        {
+        case MaterialTextureSlot::Roughness:
+            material.SetRoughnessTexture(texture);
+            material.SetRoughnessTexturePath(texturePath);
+            break;
+        case MaterialTextureSlot::Metallic:
+            material.SetMetallicTexture(texture);
+            material.SetMetallicTexturePath(texturePath);
+            break;
+        case MaterialTextureSlot::Normal:
+            material.SetNormalTexture(texture);
+            material.SetNormalTexturePath(texturePath);
+            break;
+        case MaterialTextureSlot::BaseColor:
+        default:
+            material.SetBaseColorTexture(texture);
+            material.SetBaseColorTexturePath(texturePath);
+            break;
+        }
+
+        return true;
     }
 
     bool EditorLayer::ClearSelectedMaterialTextureSlot(MaterialTextureSlot slot)
@@ -3039,28 +3337,7 @@ namespace Engine::Editor
                 continue;
             }
 
-            Renderer::Material& material = *meshRenderer->GetMaterial();
-            switch (slot)
-            {
-            case MaterialTextureSlot::Roughness:
-                material.SetRoughnessTexture(nullptr);
-                material.SetRoughnessTexturePath({});
-                break;
-            case MaterialTextureSlot::Metallic:
-                material.SetMetallicTexture(nullptr);
-                material.SetMetallicTexturePath({});
-                break;
-            case MaterialTextureSlot::Normal:
-                material.SetNormalTexture(nullptr);
-                material.SetNormalTexturePath({});
-                break;
-            case MaterialTextureSlot::BaseColor:
-            default:
-                material.SetBaseColorTexture(nullptr);
-                material.SetBaseColorTexturePath({});
-                break;
-            }
-            cleared = true;
+            cleared = ClearMaterialTextureSlot(*meshRenderer->GetMaterial(), slot) || cleared;
         }
 
         if (cleared)
@@ -3068,6 +3345,219 @@ namespace Engine::Editor
             Core::Log::Info(std::string("Cleared ") + ToMaterialTextureSlotName(slot) + " texture slot.");
         }
         return cleared;
+    }
+
+    bool EditorLayer::ClearMaterialTextureSlot(Renderer::Material& material, MaterialTextureSlot slot)
+    {
+        switch (slot)
+        {
+        case MaterialTextureSlot::Roughness:
+            if (!material.GetRoughnessTexture() && material.GetRoughnessTexturePath().empty())
+            {
+                return false;
+            }
+            material.SetRoughnessTexture(nullptr);
+            material.SetRoughnessTexturePath({});
+            return true;
+        case MaterialTextureSlot::Metallic:
+            if (!material.GetMetallicTexture() && material.GetMetallicTexturePath().empty())
+            {
+                return false;
+            }
+            material.SetMetallicTexture(nullptr);
+            material.SetMetallicTexturePath({});
+            return true;
+        case MaterialTextureSlot::Normal:
+            if (!material.GetNormalTexture() && material.GetNormalTexturePath().empty())
+            {
+                return false;
+            }
+            material.SetNormalTexture(nullptr);
+            material.SetNormalTexturePath({});
+            return true;
+        case MaterialTextureSlot::BaseColor:
+        default:
+            if (!material.GetBaseColorTexture() && material.GetBaseColorTexturePath().empty())
+            {
+                return false;
+            }
+            material.SetBaseColorTexture(nullptr);
+            material.SetBaseColorTexturePath({});
+            return true;
+        }
+    }
+
+    void EditorLayer::OpenMaterialEditor(Renderer::Renderer& renderer, const std::wstring& materialAsset)
+    {
+        if (!HasExtension(std::filesystem::path(materialAsset), { L".mat" }))
+        {
+            return;
+        }
+
+        std::shared_ptr<Renderer::Material> material = renderer.GetResourceManager().LoadMaterial(materialAsset);
+        if (!material)
+        {
+            Core::Log::Error("Failed to open material editor: " + ToNarrowAscii(materialAsset));
+            ShowNotification("Failed to open material.");
+            return;
+        }
+
+        m_materialEditorAsset = materialAsset;
+        m_materialEditorMaterial = material;
+        m_materialEditorDirty = false;
+        m_showMaterialEditor = true;
+        m_selectedMaterialAsset = materialAsset;
+        SetSingleSelectedAsset(materialAsset);
+        Core::Log::Info("Opened material editor: " + ToNarrowAscii(materialAsset));
+    }
+
+    bool EditorLayer::SaveMaterialEditor()
+    {
+        if (m_materialEditorAsset.empty() || !m_materialEditorMaterial)
+        {
+            return false;
+        }
+
+        std::filesystem::create_directories(std::filesystem::path(m_materialEditorAsset).parent_path());
+        const std::string fallbackName = std::filesystem::path(m_materialEditorAsset).stem().string();
+        Resource::MaterialDesc desc = BuildMaterialDesc(*m_materialEditorMaterial, fallbackName);
+        desc.name = fallbackName.empty() ? desc.name : fallbackName;
+        if (!Resource::MaterialLoader::SaveToFile(m_materialEditorAsset, desc))
+        {
+            Core::Log::Error("Failed to save material: " + ToNarrowAscii(m_materialEditorAsset));
+            ShowNotification("Failed to save material.");
+            return false;
+        }
+
+        m_materialEditorMaterial->SetName(desc.name);
+        m_materialEditorDirty = false;
+        RefreshAssets();
+        Core::Log::Info("Saved material: " + ToNarrowAscii(m_materialEditorAsset));
+        ShowNotification("Material saved.");
+        return true;
+    }
+
+    void EditorLayer::RenderMaterialEditor(Renderer::Renderer& renderer)
+    {
+        if (!m_showMaterialEditor)
+        {
+            return;
+        }
+
+        if (!m_materialEditorMaterial)
+        {
+            m_showMaterialEditor = false;
+            m_materialEditorAsset.clear();
+            m_materialEditorDirty = false;
+            return;
+        }
+
+        const std::string title = "Material Editor - " + ToNarrowAscii(std::filesystem::path(m_materialEditorAsset).filename().wstring());
+        ImGui::SetNextWindowSize(ImVec2(460.0f, 560.0f), ImGuiCond_FirstUseEver);
+        if (!ImGui::Begin(title.c_str(), &m_showMaterialEditor))
+        {
+            ImGui::End();
+            return;
+        }
+
+        Renderer::Material& material = *m_materialEditorMaterial;
+        ImGui::Text("Asset: %s", ToNarrowAscii(m_materialEditorAsset).c_str());
+        ImGui::Separator();
+
+        Math::Vector4 baseColor = material.GetBaseColor();
+        if (ImGui::ColorEdit4("Base Color", &baseColor.x))
+        {
+            material.SetBaseColor(baseColor);
+            m_materialEditorDirty = true;
+        }
+
+        float roughness = material.GetRoughness();
+        if (SliderAndInputFloat("Roughness", &roughness, 0.0f, 1.0f))
+        {
+            material.SetRoughness(roughness);
+            m_materialEditorDirty = true;
+        }
+
+        float metallic = material.GetMetallic();
+        if (SliderAndInputFloat("Metallic", &metallic, 0.0f, 1.0f))
+        {
+            material.SetMetallic(metallic);
+            m_materialEditorDirty = true;
+        }
+
+        ImGui::SeparatorText("Texture Slots");
+        auto drawTextureSlot = [&](MaterialTextureSlot slot)
+        {
+            const std::wstring& path = GetMaterialTextureSlotPath(material, slot);
+            const std::string pathText = ToNarrowAscii(path);
+            ImGui::PushID(ToMaterialTextureSlotName(slot));
+            ImGui::Text("%s Map", ToMaterialTextureSlotName(slot));
+            ImGui::SameLine(120.0f);
+            const std::string buttonText = pathText.empty() ? "(drop texture here)" : pathText;
+            ImGui::Button(buttonText.c_str(), ImVec2(-72.0f, 0.0f));
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_TEXTURE"))
+                {
+                    const std::wstring texturePath(static_cast<const wchar_t*>(payload->Data));
+                    m_materialEditorDirty = ApplyTextureToMaterial(renderer, material, texturePath, slot) || m_materialEditorDirty;
+                }
+                ImGui::EndDragDropTarget();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Clear", ImVec2(60.0f, 0.0f)))
+            {
+                m_materialEditorDirty = ClearMaterialTextureSlot(material, slot) || m_materialEditorDirty;
+            }
+
+            const std::shared_ptr<RHI::RHITexture>* texture = nullptr;
+            switch (slot)
+            {
+            case MaterialTextureSlot::Roughness:
+                texture = &material.GetRoughnessTexture();
+                break;
+            case MaterialTextureSlot::Metallic:
+                texture = &material.GetMetallicTexture();
+                break;
+            case MaterialTextureSlot::Normal:
+                texture = &material.GetNormalTexture();
+                break;
+            case MaterialTextureSlot::BaseColor:
+            default:
+                texture = &material.GetBaseColorTexture();
+                break;
+            }
+
+            if (texture && *texture && (*texture)->GetNativeShaderResourceHandleForUI())
+            {
+                ImGui::Image((*texture)->GetNativeShaderResourceHandleForUI(), ImVec2(72.0f, 72.0f));
+            }
+            ImGui::PopID();
+        };
+
+        drawTextureSlot(MaterialTextureSlot::BaseColor);
+        drawTextureSlot(MaterialTextureSlot::Roughness);
+        drawTextureSlot(MaterialTextureSlot::Metallic);
+        drawTextureSlot(MaterialTextureSlot::Normal);
+
+        ImGui::Separator();
+        if (ImGui::Button("Save", ImVec2(96.0f, 0.0f)))
+        {
+            SaveMaterialEditor();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Reload", ImVec2(96.0f, 0.0f)))
+        {
+            renderer.GetResourceManager().ForgetMaterial(m_materialEditorAsset);
+            OpenMaterialEditor(renderer, m_materialEditorAsset);
+        }
+        ImGui::SameLine();
+        if (m_materialEditorDirty)
+        {
+            ImGui::TextUnformatted("* modified");
+        }
+
+        ImGui::End();
     }
 
     void EditorLayer::OpenModelEditor(const std::wstring& modelAsset)
@@ -3464,6 +3954,11 @@ namespace Engine::Editor
         return m_selectedObject;
     }
 
+    const std::vector<Scene::GameObject*>& EditorLayer::GetSelectedObjects() const
+    {
+        return m_selectedObjects;
+    }
+
     bool EditorLayer::IsPlayMode() const
     {
         return m_playMode;
@@ -3481,7 +3976,7 @@ namespace Engine::Editor
 
     bool EditorLayer::ShouldShowGizmo() const
     {
-        return m_showGizmoTools;
+        return m_showGizmoTools && m_selectedObject != nullptr;
     }
 
     Renderer::GizmoVisualMode EditorLayer::GetGizmoVisualMode() const
@@ -3953,46 +4448,12 @@ namespace Engine::Editor
             m_commandManager->ExecuteCommand(std::move(command));
             SetSingleSelectedObject(commandPtr->GetCreatedObject());
         }
-        bool deletedSelected = false;
         if (m_selectedObject)
         {
             ImGui::SameLine();
             if (ImGui::Button("Delete Selected"))
             {
-                deletedSelected = DeleteSelectedObjects(scene);
-            }
-        }
-
-        if (m_selectedObject && !deletedSelected)
-        {
-            ImGui::SeparatorText("Add Component");
-            if (!m_selectedObject->GetComponent<Scene::MeshRendererComponent>() && ImGui::Button("Mesh Renderer"))
-            {
-                Scene::MeshRendererComponent& meshRenderer = m_selectedObject->AddComponent<Scene::MeshRendererComponent>();
-                meshRenderer.SetMesh(renderer.GetResourceManager().CreateCubeMesh("builtin:mesh:cube"));
-                meshRenderer.SetMaterial(renderer.GetResourceManager().CreateMaterial("editor:material:default", { 1.0f, 1.0f, 1.0f, 1.0f }));
-                meshRenderer.SetMeshPath(L"builtin:mesh:cube");
-                meshRenderer.SetMaterialPath(L"editor:material:default");
-            }
-            ImGui::SameLine();
-            if (!m_selectedObject->GetComponent<Physics::ColliderComponent>() && ImGui::Button("Collider"))
-            {
-                m_selectedObject->AddComponent<Physics::ColliderComponent>();
-            }
-            ImGui::SameLine();
-            if (!m_selectedObject->GetComponent<Scene::LightComponent>() && ImGui::Button("Light"))
-            {
-                m_selectedObject->AddComponent<Scene::LightComponent>();
-            }
-            ImGui::SameLine();
-            if (!m_selectedObject->GetComponent<Scene::PostProcessComponent>() && ImGui::Button("Post Process"))
-            {
-                m_selectedObject->AddComponent<Scene::PostProcessComponent>();
-            }
-            ImGui::SameLine();
-            if (!m_selectedObject->GetComponent<Scene::PlayerStartComponent>() && ImGui::Button("Player Start"))
-            {
-                m_selectedObject->AddComponent<Scene::PlayerStartComponent>();
+                DeleteSelectedObjects(scene);
             }
         }
 
@@ -4064,15 +4525,16 @@ namespace Engine::Editor
         {
             CreateMaterialAsset(renderer);
         }
-        if (!m_selectedMaterialAsset.empty())
+        const bool hasSelectedAsset = !m_selectedAsset.empty() || !m_selectedAssets.empty();
+        if (hasSelectedAsset)
         {
             ImGui::SameLine();
             const bool deleteKeyPressed = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
                 && !ImGui::GetIO().WantTextInput
                 && ImGui::IsKeyPressed(ImGuiKey_Delete);
-            if (ImGui::Button("Delete Material") || deleteKeyPressed)
+            if (ImGui::Button("Delete Asset") || deleteKeyPressed)
             {
-                DeleteSelectedMaterialAsset(scene, renderer);
+                DeleteSelectedAssets(scene, renderer);
             }
         }
         if (!m_selectedAsset.empty()
@@ -4271,7 +4733,7 @@ namespace Engine::Editor
             }
 
             constexpr float tileWidth = 118.0f;
-            constexpr float tileHeight = 86.0f;
+            constexpr float tileHeight = 132.0f;
             const float availableWidth = std::max(tileWidth, ImGui::GetContentRegionAvail().x);
             const int columnCount = std::max(1, static_cast<int>(availableWidth / tileWidth));
             if (ImGui::BeginTable("AssetGridTable", columnCount, ImGuiTableFlags_SizingFixedFit))
@@ -4326,8 +4788,8 @@ namespace Engine::Editor
                             ? meta->guid.substr(0, std::min<std::size_t>(8, meta->guid.size()))
                             : "no-guid";
                         const std::string typeLabel = meta ? Asset::AssetTypeToString(meta->type) : GetAssetTypeLabel(asset);
-                        std::string buttonText = typeLabel + "\n" + GetAssetFileName(asset) + "\n" + guidPrefix;
-                        if (ImGui::Button(buttonText.c_str(), ImVec2(tileWidth - 10.0f, tileHeight)))
+                        const bool isTextureAsset = HasExtension(path, { L".png", L".jpg", L".jpeg", L".bmp", L".tga" });
+                        auto handleAssetClick = [&]()
                         {
                             if (ImGui::GetIO().KeyShift)
                             {
@@ -4345,9 +4807,56 @@ namespace Engine::Editor
                             {
                                 applyAsset(asset);
                             }
+                        };
+
+                        bool assetItemHovered = false;
+                        if (isTextureAsset)
+                        {
+                            std::shared_ptr<RHI::RHITexture> texture = resources.LoadTexture(asset);
+                            void* textureHandle = texture ? texture->GetNativeShaderResourceHandleForUI() : nullptr;
+                            if (textureHandle)
+                            {
+                                const ImVec2 imageSize(72.0f, 72.0f);
+                                ImGui::Image(textureHandle, imageSize);
+                                assetItemHovered = assetItemHovered || ImGui::IsItemHovered();
+                                if (selected)
+                                {
+                                    const ImVec2 min = ImGui::GetItemRectMin();
+                                    const ImVec2 max = ImGui::GetItemRectMax();
+                                    ImGui::GetWindowDrawList()->AddRect(min, max, ImGui::GetColorU32(ImGuiCol_HeaderActive), 0.0f, 0, 2.0f);
+                                }
+                                if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
+                                {
+                                    handleAssetClick();
+                                }
+                            }
+                            else
+                            {
+                                if (ImGui::Button("TEX", ImVec2(72.0f, 72.0f)))
+                                {
+                                    handleAssetClick();
+                                }
+                                assetItemHovered = assetItemHovered || ImGui::IsItemHovered();
+                            }
+
+                            std::string buttonText = typeLabel + "\n" + GetAssetFileName(asset);
+                            if (ImGui::Button(buttonText.c_str(), ImVec2(tileWidth - 10.0f, 48.0f)))
+                            {
+                                handleAssetClick();
+                            }
+                            assetItemHovered = assetItemHovered || ImGui::IsItemHovered();
+                        }
+                        else
+                        {
+                            std::string buttonText = typeLabel + "\n" + GetAssetFileName(asset) + "\n" + guidPrefix;
+                            if (ImGui::Button(buttonText.c_str(), ImVec2(tileWidth - 10.0f, tileHeight)))
+                            {
+                                handleAssetClick();
+                            }
+                            assetItemHovered = ImGui::IsItemHovered();
                         }
                         if (HasExtension(path, { L".obj", L".gltf", L".glb", L".fbx" })
-                            && ImGui::IsItemHovered()
+                            && assetItemHovered
                             && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
                         {
                             const Asset::AssetMeta* meta = m_assetDatabase.GetMetaFromPath(path);
@@ -4360,7 +4869,13 @@ namespace Engine::Editor
                                 m_staticMeshEditor.OpenByPath(asset, m_assetDatabase, renderer.GetResourceManager());
                             }
                         }
-                        if (ImGui::IsItemHovered() && meta)
+                        if (HasExtension(path, { L".mat" })
+                            && assetItemHovered
+                            && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                        {
+                            OpenMaterialEditor(renderer, asset);
+                        }
+                        if (assetItemHovered && meta)
                         {
                             ImGui::BeginTooltip();
                             ImGui::Text("Type: %s", Asset::AssetTypeToString(meta->type));
@@ -4371,6 +4886,21 @@ namespace Engine::Editor
                         }
                         if (ImGui::BeginPopupContextItem("AssetGuidContext"))
                         {
+                            if (ImGui::MenuItem("Rename"))
+                            {
+                                SetSingleSelectedAsset(asset);
+                                BeginRenameSelectedAsset();
+                            }
+                            if (HasExtension(path, { L".mat" }) && ImGui::MenuItem("Open Material Editor"))
+                            {
+                                OpenMaterialEditor(renderer, asset);
+                            }
+                            if (ImGui::MenuItem("Delete"))
+                            {
+                                SetSingleSelectedAsset(asset);
+                                DeleteSelectedAssets(scene, renderer);
+                            }
+                            ImGui::Separator();
                             if (meta)
                             {
                                 ImGui::Text("Type: %s", Asset::AssetTypeToString(meta->type));

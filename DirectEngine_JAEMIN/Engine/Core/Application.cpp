@@ -169,6 +169,7 @@ namespace Engine::Core
         m_imguiDebugUI.BeginFrame();
         m_scene.Render(m_renderer);
         m_renderer.RenderColliders(m_scene, m_editorLayer.GetSelectedObject(), m_editorLayer.ShouldShowColliders());
+        m_renderer.RenderSelectionOutlines(m_editorLayer.GetSelectedObjects());
         m_renderer.RenderSelectionGizmo(m_editorLayer.GetSelectedObject(), m_editorLayer.ShouldShowGizmo(), m_editorLayer.GetGizmoVisualMode());
         m_renderer.ApplyPostProcess();
         UpdateDebugStats(m_time.GetDeltaTime());

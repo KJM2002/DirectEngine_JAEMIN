@@ -35,6 +35,7 @@ namespace Engine::Renderer
             float normal[3] = {};
             float color[4] = {};
             float uv[2] = {};
+            float tangent[3] = {};
         };
 
         struct DebugTransformBuffer

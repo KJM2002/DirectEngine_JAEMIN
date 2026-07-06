@@ -1,0 +1,10 @@
+material_name=M_Block
+vertex_shader=Shaders/BasicVertex.hlsl
+pixel_shader=Shaders/BasicPixel.hlsl
+base_color=1,1,1,1
+roughness=0.5
+metallic=0
+base_texture=Assets/Textures/japanese_stone_wall_diff_2k.png
+roughness_texture=Assets/Textures/japanese_stone_wall_rough_2k.png
+metallic_texture=
+normal_texture=Assets/Textures/japanese_stone_wall_nor_dx_2k.png

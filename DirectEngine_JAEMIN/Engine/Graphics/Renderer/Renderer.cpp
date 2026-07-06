@@ -20,6 +20,7 @@
 #include "ShadowMap.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <string>
 
@@ -86,6 +87,8 @@ namespace Engine::Renderer
             float metallic = 0.0f;
             float padding0 = 0.0f;
             float padding1 = 0.0f;
+            Math::Vector3 cameraPosition = { 0.0f, 0.0f, 0.0f };
+            float padding2 = 0.0f;
         };
 
         struct LightBufferData
@@ -407,6 +410,8 @@ namespace Engine::Renderer
         materialData.useNormalTexture = material.GetNormalTexture() ? 1 : 0;
         materialData.roughness = material.GetRoughness();
         materialData.metallic = material.GetMetallic();
+        const DirectX::XMMATRIX inverseView = DirectX::XMMatrixInverse(nullptr, DirectX::XMLoadFloat4x4(&view));
+        DirectX::XMStoreFloat3(&materialData.cameraPosition, inverseView.r[3]);
 
         std::uint32_t lightCount = static_cast<std::uint32_t>(std::min<std::size_t>(m_lights.size(), MaxRenderLights));
         if (lightCount == 0)
@@ -592,6 +597,65 @@ namespace Engine::Renderer
                         color);
                 }
             }
+        }
+
+        m_debugRenderer->Flush(m_device->GetContext(), camera.GetViewMatrix(), camera.GetProjectionMatrix(aspectRatio));
+    }
+
+    void Renderer::RenderSelectionOutlines(const std::vector<Scene::GameObject*>& selectedObjects)
+    {
+        if (selectedObjects.empty() || !m_debugRenderer || !m_device)
+        {
+            return;
+        }
+
+        Scene::Camera fallbackCamera;
+        const Scene::Camera& camera = m_activeCamera ? *m_activeCamera : fallbackCamera;
+        const float aspectRatio = m_height == 0 ? 1.0f : static_cast<float>(m_width) / static_cast<float>(m_height);
+        const Math::Vector4 selectionColor = { 1.0f, 0.85f, 0.1f, 1.0f };
+
+        for (const Scene::GameObject* object : selectedObjects)
+        {
+            if (!object)
+            {
+                continue;
+            }
+
+            const Math::Transform& transform = object->GetTransform();
+            Math::Vector3 center = transform.position;
+            Math::Vector3 size = { 0.65f, 0.65f, 0.65f };
+            const Scene::MeshRendererComponent* meshRenderer = object->GetComponent<Scene::MeshRendererComponent>();
+            if (meshRenderer && meshRenderer->GetMesh() && meshRenderer->GetMesh()->GetBounds().IsValid())
+            {
+                const BoundingBox& bounds = meshRenderer->GetMesh()->GetBounds();
+                const Math::Vector3 localCenter = bounds.GetCenter();
+                const Math::Vector3 localSize = bounds.GetSize();
+                const DirectX::XMMATRIX rotation = DirectX::XMMatrixRotationRollPitchYaw(transform.rotation.x, transform.rotation.y, transform.rotation.z);
+                const DirectX::XMVECTOR scaledCenter = DirectX::XMVectorSet(
+                    localCenter.x * transform.scale.x,
+                    localCenter.y * transform.scale.y,
+                    localCenter.z * transform.scale.z,
+                    0.0f);
+                const DirectX::XMVECTOR worldCenter = DirectX::XMVectorAdd(
+                    DirectX::XMLoadFloat3(&transform.position),
+                    DirectX::XMVector3TransformNormal(scaledCenter, rotation));
+
+                DirectX::XMStoreFloat3(&center, worldCenter);
+                size =
+                {
+                    std::abs(localSize.x * transform.scale.x),
+                    std::abs(localSize.y * transform.scale.y),
+                    std::abs(localSize.z * transform.scale.z)
+                };
+            }
+
+            m_debugRenderer->DrawBox(
+                center,
+                size,
+                RotateAxis(transform.rotation, { 1.0f, 0.0f, 0.0f }),
+                RotateAxis(transform.rotation, { 0.0f, 1.0f, 0.0f }),
+                RotateAxis(transform.rotation, { 0.0f, 0.0f, 1.0f }),
+                selectionColor);
         }
 
         m_debugRenderer->Flush(m_device->GetContext(), camera.GetViewMatrix(), camera.GetProjectionMatrix(aspectRatio));

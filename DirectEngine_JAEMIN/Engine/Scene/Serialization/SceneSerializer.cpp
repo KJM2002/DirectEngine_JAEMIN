@@ -133,6 +133,13 @@ namespace Engine::Scene
             return value.empty() ? ToNarrowAscii(fallback) : ToNarrowAscii(value);
         }
 
+        Resource::TextureLoadOptions MakeLinearTextureOptions()
+        {
+            Resource::TextureLoadOptions options;
+            options.sRGB = false;
+            return options;
+        }
+
         std::string Trim(const std::string& value)
         {
             const auto first = std::find_if_not(value.begin(), value.end(), [](unsigned char c) { return std::isspace(c); });
@@ -322,17 +329,17 @@ namespace Engine::Scene
                         }
                         if (!desc.materialRoughnessTexturePath.empty())
                         {
-                            material->SetRoughnessTexture(resourceManager.LoadTexture(desc.materialRoughnessTexturePath));
+                            material->SetRoughnessTexture(resourceManager.LoadTexture(desc.materialRoughnessTexturePath, MakeLinearTextureOptions()));
                             material->SetRoughnessTexturePath(desc.materialRoughnessTexturePath);
                         }
                         if (!desc.materialMetallicTexturePath.empty())
                         {
-                            material->SetMetallicTexture(resourceManager.LoadTexture(desc.materialMetallicTexturePath));
+                            material->SetMetallicTexture(resourceManager.LoadTexture(desc.materialMetallicTexturePath, MakeLinearTextureOptions()));
                             material->SetMetallicTexturePath(desc.materialMetallicTexturePath);
                         }
                         if (!desc.materialNormalTexturePath.empty())
                         {
-                            material->SetNormalTexture(resourceManager.LoadTexture(desc.materialNormalTexturePath));
+                            material->SetNormalTexture(resourceManager.LoadTexture(desc.materialNormalTexturePath, MakeLinearTextureOptions()));
                             material->SetNormalTexturePath(desc.materialNormalTexturePath);
                         }
                         meshRenderer.SetMaterial(material);

@@ -18,12 +18,14 @@ struct VSInput
     float3 normal : NORMAL;
     float4 color : COLOR;
     float2 uv : TEXCOORD;
+    float3 tangent : TANGENT;
 };
 
 struct VSOutput
 {
     float4 position : SV_POSITION;
     float3 normal : NORMAL;
+    float3 tangent : TANGENT;
     float3 worldPosition : TEXCOORD1;
     float4 shadowPosition : TEXCOORD2;
     float4 color : COLOR;
@@ -39,6 +41,7 @@ VSOutput main(VSInput input)
     output.position = mul(viewPosition, Projection);
     output.shadowPosition = mul(lightViewPosition, LightProjection);
     output.normal = normalize(mul(float4(input.normal, 0.0f), World).xyz);
+    output.tangent = normalize(mul(float4(input.tangent, 0.0f), World).xyz);
     output.worldPosition = worldPosition.xyz;
     output.color = input.color;
     output.uv = input.uv;

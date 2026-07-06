@@ -98,6 +98,7 @@ namespace Engine::Renderer
         void RenderShadowPass(const Scene::Scene& scene);
         void Render(const Scene::GameObject& object);
         void RenderColliders(const Scene::Scene& scene, const Scene::GameObject* selectedObject, bool enabled);
+        void RenderSelectionOutlines(const std::vector<Scene::GameObject*>& selectedObjects);
         void RenderSelectionGizmo(const Scene::GameObject* selectedObject, bool enabled, GizmoVisualMode mode);
         void* RenderStaticMeshPreview(const Mesh& mesh, std::uint32_t width, std::uint32_t height, const Math::Matrix4x4& view, const Math::Matrix4x4& projection);
         void ApplyPostProcess();

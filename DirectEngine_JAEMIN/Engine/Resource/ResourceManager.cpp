@@ -28,6 +28,22 @@ namespace Engine::Resource
             }
             return result;
         }
+
+        std::wstring MakeTextureCacheKey(const std::wstring& path, const TextureLoadOptions& options)
+        {
+            return path
+                + L"|srgb=" + std::to_wstring(options.sRGB ? 1 : 0)
+                + L"|mips=" + std::to_wstring(options.generateMips ? 1 : 0)
+                + L"|filter=" + std::to_wstring(static_cast<int>(options.filter))
+                + L"|address=" + std::to_wstring(static_cast<int>(options.addressMode));
+        }
+
+        TextureLoadOptions MakeLinearTextureOptions()
+        {
+            TextureLoadOptions options;
+            options.sRGB = false;
+            return options;
+        }
     }
 
     ResourceManager::ResourceManager(RHI::RHIDevice& device)
@@ -186,7 +202,8 @@ namespace Engine::Resource
 
     std::shared_ptr<RHI::RHITexture> ResourceManager::LoadTexture(const std::wstring& path, const TextureLoadOptions& options)
     {
-        if (auto it = m_fileTextures.find(path); it != m_fileTextures.end())
+        const std::wstring cacheKey = MakeTextureCacheKey(path, options);
+        if (auto it = m_fileTextures.find(cacheKey); it != m_fileTextures.end())
         {
             return it->second;
         }
@@ -196,7 +213,7 @@ namespace Engine::Resource
         {
             Core::Log::Warning("Texture load failed, using checker fallback: " + ToNarrowAscii(path));
             std::shared_ptr<RHI::RHITexture> fallbackTexture = CreateCheckerTexture();
-            m_fileTextures.emplace(path, fallbackTexture);
+            m_fileTextures.emplace(cacheKey, fallbackTexture);
             return fallbackTexture;
         }
 
@@ -216,11 +233,11 @@ namespace Engine::Resource
         {
             Core::Log::Warning("Texture creation failed, using checker fallback: " + ToNarrowAscii(path));
             std::shared_ptr<RHI::RHITexture> fallbackTexture = CreateCheckerTexture();
-            m_fileTextures.emplace(path, fallbackTexture);
+            m_fileTextures.emplace(cacheKey, fallbackTexture);
             return fallbackTexture;
         }
 
-        m_fileTextures.emplace(path, texture);
+        m_fileTextures.emplace(cacheKey, texture);
         return texture;
     }
 
@@ -305,17 +322,17 @@ namespace Engine::Resource
         }
         if (!desc.roughnessTexturePath.empty())
         {
-            material->SetRoughnessTexture(LoadTexture(desc.roughnessTexturePath));
+            material->SetRoughnessTexture(LoadTexture(desc.roughnessTexturePath, MakeLinearTextureOptions()));
             material->SetRoughnessTexturePath(desc.roughnessTexturePath);
         }
         if (!desc.metallicTexturePath.empty())
         {
-            material->SetMetallicTexture(LoadTexture(desc.metallicTexturePath));
+            material->SetMetallicTexture(LoadTexture(desc.metallicTexturePath, MakeLinearTextureOptions()));
             material->SetMetallicTexturePath(desc.metallicTexturePath);
         }
         if (!desc.normalTexturePath.empty())
         {
-            material->SetNormalTexture(LoadTexture(desc.normalTexturePath));
+            material->SetNormalTexture(LoadTexture(desc.normalTexturePath, MakeLinearTextureOptions()));
             material->SetNormalTexturePath(desc.normalTexturePath);
         }
 
