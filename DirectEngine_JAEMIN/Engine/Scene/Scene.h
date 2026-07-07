@@ -21,7 +21,10 @@ namespace Engine::Scene
     {
     public:
         GameObject& CreateGameObject(const std::string& name);
+        GameObject& CreateGameObject(const std::string& name, ObjectID id);
         bool DestroyGameObject(GameObject* object);
+        GameObject* FindGameObjectByID(ObjectID id) const;
+        Component* FindComponentByID(ComponentID id) const;
         void Update(float deltaTime);
         void Render(Renderer::Renderer& renderer);
         void Clear();

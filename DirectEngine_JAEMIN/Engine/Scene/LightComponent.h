@@ -9,6 +9,9 @@ namespace Engine::Scene
     class LightComponent : public Component
     {
     public:
+        static constexpr const char* StaticTypeName = "Light";
+        const char* GetTypeName() const override { return StaticTypeName; }
+
         LightType type = LightType::Point;
         Math::Vector3 color = { 1.0f, 1.0f, 1.0f };
         float intensity = 1.0f;

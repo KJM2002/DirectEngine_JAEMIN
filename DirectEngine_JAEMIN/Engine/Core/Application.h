@@ -41,7 +41,6 @@ namespace Engine::Core
         Editor::EditorCamera m_editorCamera;
         Editor::EditorLayer m_editorLayer;
         Debug::ImGuiDebugUI m_imguiDebugUI;
-        Scene::GameObject* m_demoObject = nullptr;
         Debug::DebugUI m_debugUI;
         Debug::DebugStats m_debugStats;
         Audio::AudioSystem m_audioSystem;

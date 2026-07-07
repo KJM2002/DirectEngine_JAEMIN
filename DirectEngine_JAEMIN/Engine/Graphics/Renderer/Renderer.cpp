@@ -15,8 +15,10 @@
 #include "Engine/Scene/Scene.h"
 
 #include "DebugRenderer.h"
+#include "GizmoRenderer.h"
 #include "Material.h"
 #include "Mesh.h"
+#include "SelectionOutlineRenderer.h"
 #include "ShadowMap.h"
 
 #include <algorithm>
@@ -36,6 +38,38 @@ namespace Engine::Renderer
         Math::Vector3 Scale(const Math::Vector3& value, float amount)
         {
             return { value.x * amount, value.y * amount, value.z * amount };
+        }
+
+        Math::Vector3 Normalize(DirectX::FXMVECTOR value)
+        {
+            Math::Vector3 result;
+            DirectX::XMStoreFloat3(&result, DirectX::XMVector3Normalize(value));
+            return result;
+        }
+
+        Math::Vector3 GetCameraRight(const Scene::Camera& camera)
+        {
+            const float cosPitch = std::cos(camera.pitch);
+            const DirectX::XMVECTOR forward = DirectX::XMVector3Normalize(DirectX::XMVectorSet(
+                std::sin(camera.yaw) * cosPitch,
+                -std::sin(camera.pitch),
+                std::cos(camera.yaw) * cosPitch,
+                0.0f));
+            const DirectX::XMVECTOR up = DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+            return Normalize(DirectX::XMVector3Cross(up, forward));
+        }
+
+        Math::Vector3 GetCameraUp(const Scene::Camera& camera)
+        {
+            const float cosPitch = std::cos(camera.pitch);
+            const DirectX::XMVECTOR forward = DirectX::XMVector3Normalize(DirectX::XMVectorSet(
+                std::sin(camera.yaw) * cosPitch,
+                -std::sin(camera.pitch),
+                std::cos(camera.yaw) * cosPitch,
+                0.0f));
+            const Math::Vector3 rightVector = GetCameraRight(camera);
+            const DirectX::XMVECTOR right = DirectX::XMLoadFloat3(&rightVector);
+            return Normalize(DirectX::XMVector3Cross(forward, right));
         }
 
         Math::Vector3 RotateAxis(const Math::Vector3& rotationValue, const Math::Vector3& axis)
@@ -85,7 +119,7 @@ namespace Engine::Renderer
             std::int32_t useNormalTexture = 0;
             float roughness = 0.5f;
             float metallic = 0.0f;
-            float padding0 = 0.0f;
+            float normalStrength = 1.0f;
             float padding1 = 0.0f;
             Math::Vector3 cameraPosition = { 0.0f, 0.0f, 0.0f };
             float padding2 = 0.0f;
@@ -162,6 +196,20 @@ namespace Engine::Renderer
             return false;
         }
 
+        m_gizmoRenderer = std::make_unique<GizmoRenderer>();
+        if (!m_gizmoRenderer->Initialize(*m_device))
+        {
+            Core::Log::Error("Failed to initialize gizmo renderer.");
+            return false;
+        }
+
+        m_selectionOutlineRenderer = std::make_unique<SelectionOutlineRenderer>();
+        if (!m_selectionOutlineRenderer->Initialize(*m_device, width, height))
+        {
+            Core::Log::Error("Failed to initialize selection outline renderer.");
+            return false;
+        }
+
         m_shadowMap = std::make_unique<ShadowMap>();
         if (!m_shadowMap->Initialize(*m_device))
         {
@@ -195,10 +243,20 @@ namespace Engine::Renderer
         m_sceneDepthTarget.reset();
         m_previewColorTarget.reset();
         m_previewDepthTarget.reset();
+        if (m_selectionOutlineRenderer)
+        {
+            m_selectionOutlineRenderer->Shutdown();
+            m_selectionOutlineRenderer.reset();
+        }
         if (m_debugRenderer)
         {
             m_debugRenderer->Shutdown();
             m_debugRenderer.reset();
+        }
+        if (m_gizmoRenderer)
+        {
+            m_gizmoRenderer->Shutdown();
+            m_gizmoRenderer.reset();
         }
         if (m_shadowMap)
         {
@@ -229,11 +287,12 @@ namespace Engine::Renderer
         (void)deltaTime;
     }
 
-    void Renderer::BeginFrame(float red, float green, float blue, float alpha)
+    void Renderer::BeginFrame(float red, float green, float blue, float alpha, bool selectionOutlineCandidate)
     {
         m_drawCallCount = 0;
         m_triangleCount = 0;
         m_renderQueue.Clear();
+        m_selectionOutlineMaskReady = false;
 
         if (!m_device)
         {
@@ -242,7 +301,9 @@ namespace Engine::Renderer
 
         RHI::RHIContext& context = m_device->GetContext();
         context.SetTexture(RHI::ShaderStage::Pixel, 0, nullptr);
-        if (m_enablePostProcess)
+        m_frameUsesSceneColorTarget = m_enablePostProcess
+            || (selectionOutlineCandidate && m_selectionOutlineSettings.enabled && m_selectionOutlineRenderer != nullptr);
+        if (m_frameUsesSceneColorTarget)
         {
             context.SetRenderTarget(m_sceneColorTarget, m_sceneDepthTarget);
         }
@@ -283,6 +344,10 @@ namespace Engine::Renderer
         {
             m_sceneColorTarget = m_device->CreateRenderTarget(width, height, RHI::TextureFormat::RGBA8);
             m_sceneDepthTarget = m_device->CreateDepthTarget(width, height, RHI::TextureFormat::D24S8, false);
+            if (m_selectionOutlineRenderer)
+            {
+                m_selectionOutlineRenderer->Resize(width, height);
+            }
 
             RHI::ViewportDesc viewport;
             viewport.width = static_cast<float>(width);
@@ -410,6 +475,7 @@ namespace Engine::Renderer
         materialData.useNormalTexture = material.GetNormalTexture() ? 1 : 0;
         materialData.roughness = material.GetRoughness();
         materialData.metallic = material.GetMetallic();
+        materialData.normalStrength = material.GetNormalStrength();
         const DirectX::XMMATRIX inverseView = DirectX::XMMatrixInverse(nullptr, DirectX::XMLoadFloat4x4(&view));
         DirectX::XMStoreFloat3(&materialData.cameraPosition, inverseView.r[3]);
 
@@ -604,6 +670,33 @@ namespace Engine::Renderer
 
     void Renderer::RenderSelectionOutlines(const std::vector<Scene::GameObject*>& selectedObjects)
     {
+        m_selectionOutlineMaskReady = false;
+
+        if (m_selectionOutlineSettings.enabled && !selectedObjects.empty() && m_selectionOutlineRenderer && m_device && m_frameUsesSceneColorTarget)
+        {
+            Scene::Camera fallbackCamera;
+            const Scene::Camera& camera = m_activeCamera ? *m_activeCamera : fallbackCamera;
+            const float aspectRatio = m_height == 0 ? 1.0f : static_cast<float>(m_width) / static_cast<float>(m_height);
+            RHI::RHIContext& context = m_device->GetContext();
+            m_selectionOutlineMaskReady = m_selectionOutlineRenderer->RenderMask(context, selectedObjects, camera, aspectRatio, m_sceneDepthTarget);
+            context.SetRenderTarget(m_sceneColorTarget, m_sceneDepthTarget);
+
+            RHI::ViewportDesc viewport;
+            viewport.width = static_cast<float>(m_width);
+            viewport.height = static_cast<float>(m_height);
+            viewport.minDepth = 0.0f;
+            viewport.maxDepth = 1.0f;
+            context.SetViewport(viewport);
+        }
+
+        if (m_selectionOutlineSettings.debugLineEnabled)
+        {
+            RenderDebugSelectionOutlines(selectedObjects);
+        }
+    }
+
+    void Renderer::RenderDebugSelectionOutlines(const std::vector<Scene::GameObject*>& selectedObjects)
+    {
         if (selectedObjects.empty() || !m_debugRenderer || !m_device)
         {
             return;
@@ -613,6 +706,11 @@ namespace Engine::Renderer
         const Scene::Camera& camera = m_activeCamera ? *m_activeCamera : fallbackCamera;
         const float aspectRatio = m_height == 0 ? 1.0f : static_cast<float>(m_width) / static_cast<float>(m_height);
         const Math::Vector4 selectionColor = { 1.0f, 0.85f, 0.1f, 1.0f };
+        const Math::Vector3 cameraRight = GetCameraRight(camera);
+        const Math::Vector3 cameraUp = GetCameraUp(camera);
+
+        // Keep selection outlines solid and readable even when the selected mesh overlaps the bounds.
+        m_device->GetContext().ClearDepthStencil(1.0f, 0);
 
         for (const Scene::GameObject* object : selectedObjects)
         {
@@ -649,21 +747,44 @@ namespace Engine::Renderer
                 };
             }
 
-            m_debugRenderer->DrawBox(
-                center,
-                size,
-                RotateAxis(transform.rotation, { 1.0f, 0.0f, 0.0f }),
-                RotateAxis(transform.rotation, { 0.0f, 1.0f, 0.0f }),
-                RotateAxis(transform.rotation, { 0.0f, 0.0f, 1.0f }),
-                selectionColor);
+            const DirectX::XMVECTOR cameraPosition = DirectX::XMLoadFloat3(&camera.position);
+            const DirectX::XMVECTOR outlineCenter = DirectX::XMLoadFloat3(&center);
+            const float cameraDistance = std::max(0.1f, DirectX::XMVectorGetX(DirectX::XMVector3Length(DirectX::XMVectorSubtract(outlineCenter, cameraPosition))));
+            const float outlineOffset = std::clamp(cameraDistance * 0.0015f, 0.0025f, 0.045f);
+            const Math::Vector3 outlineAxisX = RotateAxis(transform.rotation, { 1.0f, 0.0f, 0.0f });
+            const Math::Vector3 outlineAxisY = RotateAxis(transform.rotation, { 0.0f, 1.0f, 0.0f });
+            const Math::Vector3 outlineAxisZ = RotateAxis(transform.rotation, { 0.0f, 0.0f, 1.0f });
+            const Math::Vector3 offsets[] =
+            {
+                { 0.0f, 0.0f, 0.0f },
+                Scale(cameraRight, outlineOffset),
+                Scale(cameraRight, -outlineOffset),
+                Scale(cameraUp, outlineOffset),
+                Scale(cameraUp, -outlineOffset),
+                Add(Scale(cameraRight, outlineOffset), Scale(cameraUp, outlineOffset)),
+                Add(Scale(cameraRight, -outlineOffset), Scale(cameraUp, outlineOffset)),
+                Add(Scale(cameraRight, outlineOffset), Scale(cameraUp, -outlineOffset)),
+                Add(Scale(cameraRight, -outlineOffset), Scale(cameraUp, -outlineOffset))
+            };
+
+            for (const Math::Vector3& offset : offsets)
+            {
+                m_debugRenderer->DrawBox(
+                    Add(center, offset),
+                    size,
+                    outlineAxisX,
+                    outlineAxisY,
+                    outlineAxisZ,
+                    selectionColor);
+            }
         }
 
         m_debugRenderer->Flush(m_device->GetContext(), camera.GetViewMatrix(), camera.GetProjectionMatrix(aspectRatio));
     }
 
-    void Renderer::RenderSelectionGizmo(const Scene::GameObject* selectedObject, bool enabled, GizmoVisualMode mode)
+    void Renderer::RenderSelectionGizmo(const Scene::GameObject* selectedObject, bool enabled, GizmoVisualMode mode, GizmoAxis hoveredAxis, GizmoAxis activeAxis)
     {
-        if (!enabled || !selectedObject || !m_debugRenderer || !m_device)
+        if (!enabled || !selectedObject || !m_device)
         {
             return;
         }
@@ -675,7 +796,37 @@ namespace Engine::Renderer
         const Math::Vector3 origin = transform.position;
 
         // Draw editor gizmos on top of scene geometry so nearby objects do not hide them.
-        m_device->GetContext().ClearDepthStencil(1.0f, 0);
+        RHI::RHIContext& context = m_device->GetContext();
+        context.SetDefaultRenderTarget();
+        RHI::ViewportDesc viewport;
+        viewport.width = static_cast<float>(m_width);
+        viewport.height = static_cast<float>(m_height);
+        viewport.minDepth = 0.0f;
+        viewport.maxDepth = 1.0f;
+        context.SetViewport(viewport);
+        context.ClearDepthStencil(1.0f, 0);
+
+        if (mode == GizmoVisualMode::Move && m_gizmoRenderer)
+        {
+            GizmoRenderDesc desc;
+            desc.camera = &camera;
+            desc.position = origin;
+            desc.rotation = transform.rotation;
+            desc.viewportWidth = static_cast<float>(m_width);
+            desc.viewportHeight = static_cast<float>(m_height);
+            desc.mode = mode;
+            desc.hoveredAxis = hoveredAxis;
+            desc.activeAxis = activeAxis;
+            m_gizmoRenderer->BeginFrame();
+            m_gizmoRenderer->RenderMoveGizmo(desc);
+            m_gizmoRenderer->EndFrame(context, desc);
+            return;
+        }
+
+        if (!m_debugRenderer)
+        {
+            return;
+        }
 
         const DirectX::XMVECTOR cameraPosition = DirectX::XMLoadFloat3(&camera.position);
         const DirectX::XMVECTOR objectPosition = DirectX::XMLoadFloat3(&origin);
@@ -704,33 +855,48 @@ namespace Engine::Renderer
             { 0.1f, 1.0f, 0.1f, 1.0f },
             { 0.2f, 0.45f, 1.0f, 1.0f }
         };
+        const GizmoAxis axisIds[] = { GizmoAxis::X, GizmoAxis::Y, GizmoAxis::Z };
+
+        auto resolveColor = [&](int axisIndex)
+        {
+            if (axisIds[axisIndex] == activeAxis)
+            {
+                return Math::Vector4{ 1.0f, 0.82f, 0.12f, 1.0f };
+            }
+            if (axisIds[axisIndex] == hoveredAxis)
+            {
+                return Math::Vector4{ 1.0f, 1.0f, 0.35f, 1.0f };
+            }
+            return colors[axisIndex];
+        };
 
         if (mode == GizmoVisualMode::Rotate)
         {
-            m_debugRenderer->DrawCircle(origin, ringRadius, axes[1], axes[2], colors[0]);
-            m_debugRenderer->DrawCircle(origin, ringRadius, axes[0], axes[2], colors[1]);
-            m_debugRenderer->DrawCircle(origin, ringRadius, axes[0], axes[1], colors[2]);
+            m_debugRenderer->DrawCircle(origin, ringRadius, axes[1], axes[2], resolveColor(0));
+            m_debugRenderer->DrawCircle(origin, ringRadius, axes[0], axes[2], resolveColor(1));
+            m_debugRenderer->DrawCircle(origin, ringRadius, axes[0], axes[1], resolveColor(2));
         }
         else
         {
             for (int i = 0; i < 3; ++i)
             {
                 const Math::Vector3 end = Add(origin, Scale(axes[i], axisLength));
-                m_debugRenderer->DrawLine(origin, end, colors[i]);
+                const Math::Vector4 axisColor = resolveColor(i);
+                m_debugRenderer->DrawLine(origin, end, axisColor);
 
                 if (mode == GizmoVisualMode::Move)
                 {
                     const Math::Vector3 arrowBase = Add(origin, Scale(axes[i], axisLength - 0.25f));
                     const Math::Vector3 sideA = Scale(axes[(i + 1) % 3], 0.12f);
                     const Math::Vector3 sideB = Scale(axes[(i + 2) % 3], 0.12f);
-                    m_debugRenderer->DrawLine(end, Add(arrowBase, sideA), colors[i]);
-                    m_debugRenderer->DrawLine(end, Add(arrowBase, Scale(sideA, -1.0f)), colors[i]);
-                    m_debugRenderer->DrawLine(end, Add(arrowBase, sideB), colors[i]);
-                    m_debugRenderer->DrawLine(end, Add(arrowBase, Scale(sideB, -1.0f)), colors[i]);
+                    m_debugRenderer->DrawLine(end, Add(arrowBase, sideA), axisColor);
+                    m_debugRenderer->DrawLine(end, Add(arrowBase, Scale(sideA, -1.0f)), axisColor);
+                    m_debugRenderer->DrawLine(end, Add(arrowBase, sideB), axisColor);
+                    m_debugRenderer->DrawLine(end, Add(arrowBase, Scale(sideB, -1.0f)), axisColor);
                 }
                 else if (mode == GizmoVisualMode::Scale)
                 {
-                    m_debugRenderer->DrawBox(end, { boxSize, boxSize, boxSize }, axes[0], axes[1], axes[2], colors[i]);
+                    m_debugRenderer->DrawBox(end, { boxSize, boxSize, boxSize }, axes[0], axes[1], axes[2], axisColor);
                 }
             }
         }
@@ -741,23 +907,53 @@ namespace Engine::Renderer
 
     void Renderer::ApplyPostProcess()
     {
-        if (!m_enablePostProcess || !m_device || !m_postProcessStack)
+        if (!m_device || !m_frameUsesSceneColorTarget || !m_sceneColorTarget)
         {
             return;
         }
 
         RHI::RHIContext& context = m_device->GetContext();
+        const bool postProcessActive = m_enablePostProcess && m_postProcessStack != nullptr;
+        std::shared_ptr<RHI::RHITexture> postProcessSource = m_sceneColorTarget;
+
+        if (m_selectionOutlineRenderer && m_selectionOutlineSettings.enabled && m_selectionOutlineMaskReady)
+        {
+            if (postProcessActive)
+            {
+                postProcessSource = m_selectionOutlineRenderer->GetCompositeTarget();
+                m_selectionOutlineRenderer->Composite(context, m_sceneColorTarget, postProcessSource, m_selectionOutlineSettings, m_selectionOutlineMaskReady);
+            }
+            else
+            {
+                m_selectionOutlineRenderer->CompositeToDefault(context, m_sceneColorTarget, m_selectionOutlineSettings, m_selectionOutlineMaskReady);
+                m_selectionOutlineMaskReady = false;
+                m_frameUsesSceneColorTarget = false;
+                return;
+            }
+        }
+
         context.SetDefaultRenderTarget();
-        context.ClearRenderTarget(0.0f, 0.0f, 0.0f, 1.0f);
-        context.ClearDepthStencil(1.0f, 0);
         RHI::ViewportDesc viewport;
         viewport.width = static_cast<float>(m_width);
         viewport.height = static_cast<float>(m_height);
         viewport.minDepth = 0.0f;
         viewport.maxDepth = 1.0f;
         context.SetViewport(viewport);
-        m_postProcessStack->Apply(context, m_sceneColorTarget);
+        context.ClearRenderTarget(0.0f, 0.0f, 0.0f, 1.0f);
+        context.ClearDepthStencil(1.0f, 0);
+
+        if (postProcessActive)
+        {
+            m_postProcessStack->Apply(context, postProcessSource);
+        }
+        else if (m_selectionOutlineRenderer)
+        {
+            m_selectionOutlineRenderer->CompositeToDefault(context, m_sceneColorTarget, m_selectionOutlineSettings, false);
+        }
+
         context.SetTexture(RHI::ShaderStage::Pixel, 0, nullptr);
+        m_selectionOutlineMaskReady = false;
+        m_frameUsesSceneColorTarget = false;
     }
 
     void* Renderer::RenderStaticMeshPreview(const Mesh& mesh, std::uint32_t width, std::uint32_t height, const Math::Matrix4x4& view, const Math::Matrix4x4& projection)
@@ -829,6 +1025,18 @@ namespace Engine::Renderer
         }
 
         return {};
+    }
+
+    void Renderer::SetSelectionOutlineSettings(const SelectionOutlineSettings& settings)
+    {
+        m_selectionOutlineSettings = settings;
+        m_selectionOutlineSettings.width = std::clamp(m_selectionOutlineSettings.width, 1.0f, 16.0f);
+        m_selectionOutlineSettings.opacity = std::clamp(m_selectionOutlineSettings.opacity, 0.0f, 1.0f);
+    }
+
+    SelectionOutlineSettings Renderer::GetSelectionOutlineSettings() const
+    {
+        return m_selectionOutlineSettings;
     }
 
     std::uint32_t Renderer::GetDrawCallCount() const

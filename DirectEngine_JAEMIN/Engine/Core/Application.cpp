@@ -11,6 +11,7 @@
 
 #include <memory>
 #include <utility>
+#include <vector>
 
 namespace Engine::Core
 {
@@ -148,12 +149,6 @@ namespace Engine::Core
             m_camera->UpdateFromInput(m_input, deltaTime);
         }
 
-        if (m_demoObject)
-        {
-            m_demoObject->GetTransform().rotation.x += deltaTime * 0.75f;
-            m_demoObject->GetTransform().rotation.y += deltaTime * 1.15f;
-        }
-
         m_scene.Update(deltaTime);
 
         Physics::PhysicsWorld physicsWorld;
@@ -165,13 +160,19 @@ namespace Engine::Core
     {
         m_editorLayer.ApplyRendererSettings(m_renderer, m_scene);
         m_renderer.RenderShadowPass(m_scene);
-        m_renderer.BeginFrame(0.08f, 0.08f, 0.09f, 1.0f);
+        const std::vector<Scene::GameObject*>& selectedObjects = m_editorLayer.GetSelectedObjects();
+        m_renderer.BeginFrame(0.08f, 0.08f, 0.09f, 1.0f, !selectedObjects.empty());
         m_imguiDebugUI.BeginFrame();
         m_scene.Render(m_renderer);
         m_renderer.RenderColliders(m_scene, m_editorLayer.GetSelectedObject(), m_editorLayer.ShouldShowColliders());
-        m_renderer.RenderSelectionOutlines(m_editorLayer.GetSelectedObjects());
-        m_renderer.RenderSelectionGizmo(m_editorLayer.GetSelectedObject(), m_editorLayer.ShouldShowGizmo(), m_editorLayer.GetGizmoVisualMode());
+        m_renderer.RenderSelectionOutlines(selectedObjects);
         m_renderer.ApplyPostProcess();
+        m_renderer.RenderSelectionGizmo(
+            m_editorLayer.GetSelectedObject(),
+            m_editorLayer.ShouldShowGizmo(),
+            m_editorLayer.GetGizmoVisualMode(),
+            m_editorLayer.GetHoveredGizmoAxis(),
+            m_editorLayer.GetActiveGizmoAxis());
         UpdateDebugStats(m_time.GetDeltaTime());
         m_editorLayer.Render(m_scene, m_debugStats, m_renderer);
         SynchronizeSceneReferences();
@@ -182,7 +183,6 @@ namespace Engine::Core
     void Application::Shutdown()
     {
         Log::Info("Shutting down application.");
-        m_demoObject = nullptr;
         m_scene.Clear();
         m_imguiDebugUI.Shutdown();
         m_editorLayer.Shutdown();
@@ -210,11 +210,13 @@ namespace Engine::Core
             }
             m_scene.SetFilePath(L"Assets/Scenes/Test.scene");
             m_scene.ClearDirty();
-            m_demoObject = nullptr;
             return true;
         }
 
         m_camera = std::make_shared<Scene::Camera>();
+        m_camera->position = { 2.6f, 1.35f, -3.1f };
+        m_camera->yaw = -0.697f;
+        m_camera->pitch = 0.318f;
         m_scene.SetActiveCamera(m_camera);
         m_editorCamera.SetFrom(*m_camera);
 
@@ -245,11 +247,6 @@ namespace Engine::Core
         meshRenderer.SetMaterial(std::move(cubeMaterial));
         meshRenderer.SetMeshPath(L"builtin:mesh:cube");
         meshRenderer.SetMaterialPath(L"builtin:material:checker_cube");
-        m_demoObject = &cube;
-
-        Scene::GameObject& playerStart = m_scene.CreateGameObject("PlayerStart");
-        playerStart.GetTransform().position = { 0.0f, 0.0f, -5.0f };
-        playerStart.AddComponent<Scene::PlayerStartComponent>();
         m_scene.SetFilePath({});
         m_scene.ClearDirty();
         return true;
@@ -323,14 +320,12 @@ namespace Engine::Core
         {
             m_camera = activeCamera;
             m_editorCamera.SetFrom(*m_camera);
-            m_demoObject = nullptr;
             m_input.SetMouseCaptured(false);
             Log::Info("Synchronized application camera after scene change.");
         }
         else if (!activeCamera)
         {
             m_camera.reset();
-            m_demoObject = nullptr;
         }
     }
 

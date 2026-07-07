@@ -141,6 +141,10 @@ namespace Engine::Resource
             {
                 outDesc.metallic = std::clamp(std::stof(value), 0.0f, 1.0f);
             }
+            else if (key == "normal_strength")
+            {
+                outDesc.normalStrength = std::clamp(std::stof(value), 0.0f, 4.0f);
+            }
         }
 
         if (outDesc.vertexShaderPath.empty())
@@ -170,6 +174,7 @@ namespace Engine::Resource
         file << "base_color=" << desc.baseColor.x << "," << desc.baseColor.y << "," << desc.baseColor.z << "," << desc.baseColor.w << "\n";
         file << "roughness=" << desc.roughness << "\n";
         file << "metallic=" << desc.metallic << "\n";
+        file << "normal_strength=" << desc.normalStrength << "\n";
         file << "base_texture=" << ToNarrowAscii(desc.texturePath) << "\n";
         file << "roughness_texture=" << ToNarrowAscii(desc.roughnessTexturePath) << "\n";
         file << "metallic_texture=" << ToNarrowAscii(desc.metallicTexturePath) << "\n";

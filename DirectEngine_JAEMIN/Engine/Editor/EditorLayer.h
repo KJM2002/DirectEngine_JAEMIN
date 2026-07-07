@@ -4,6 +4,7 @@
 #include "Engine/Editor/Command/GameObjectSnapshot.h"
 #include "Engine/Editor/EditorDirtyManager.h"
 #include "Engine/Editor/MeshEditor/StaticMeshEditor.h"
+#include "Engine/Editor/Property/PropertyValue.h"
 #include "Engine/Math/MathTypes.h"
 #include "Engine/Math/Transform.h"
 #include "Engine/Physics/ColliderComponent.h"
@@ -36,6 +37,7 @@ namespace Engine::Scene
 namespace Engine::Renderer
 {
     enum class GizmoVisualMode;
+    enum class GizmoAxis;
     class Material;
     class Renderer;
 }
@@ -102,6 +104,8 @@ namespace Engine::Editor
         bool ShouldShowColliders() const;
         bool ShouldShowGizmo() const;
         Renderer::GizmoVisualMode GetGizmoVisualMode() const;
+        Renderer::GizmoAxis GetHoveredGizmoAxis() const;
+        Renderer::GizmoAxis GetActiveGizmoAxis() const;
         void RequestExit(Scene::Scene& scene);
         bool ConsumeExitRequested();
         std::wstring BuildWindowTitle(const std::wstring& baseTitle, Scene::Scene& scene);
@@ -153,7 +157,8 @@ namespace Engine::Editor
         bool ClearSelectedMaterialTextureSlot(MaterialTextureSlot slot);
         bool ClearMaterialTextureSlot(Renderer::Material& material, MaterialTextureSlot slot);
         void OpenMaterialEditor(Renderer::Renderer& renderer, const std::wstring& materialAsset);
-        void RenderMaterialEditor(Renderer::Renderer& renderer);
+        void RenderMaterialEditor(Scene::Scene& scene, Renderer::Renderer& renderer);
+        void SyncMaterialEditorMaterialToScene(Scene::Scene& scene);
         bool SaveMaterialEditor();
         void OpenModelEditor(const std::wstring& modelAsset);
         void RenderModelEditor(Scene::Scene& scene, Renderer::Renderer& renderer);
@@ -170,6 +175,7 @@ namespace Engine::Editor
         std::vector<Scene::GameObject*> m_selectedObjects;
         std::unique_ptr<CommandManager> m_commandManager;
         GizmoMode m_gizmoMode = GizmoMode::Move;
+        GizmoAxis m_hoveredGizmoAxis = GizmoAxis::None;
         GizmoAxis m_activeGizmoAxis = GizmoAxis::None;
         float m_moveSnapRemainder = 0.0f;
         float m_rotateSnapRemainder = 0.0f;
@@ -208,9 +214,14 @@ namespace Engine::Editor
         bool m_focusFolderRenameInput = false;
         bool m_playMode = false;
         bool m_wantsInputCapture = false;
-        bool m_showColliders = true;
+        bool m_showColliders = false;
         bool m_showAssetBrowser = true;
         bool m_showGizmoTools = true;
+        bool m_screenSelectionOutline = true;
+        bool m_debugSelectionOutline = false;
+        std::array<float, 4> m_selectionOutlineColor = { 1.0f, 0.78f, 0.08f, 1.0f };
+        float m_selectionOutlineWidth = 4.0f;
+        float m_selectionOutlineOpacity = 1.0f;
         float m_toolbarHeight = 78.0f;
         float m_rightPanelWidth = 430.0f;
         float m_bottomPanelHeight = 280.0f;
@@ -241,6 +252,11 @@ namespace Engine::Editor
         std::wstring m_materialEditorAsset;
         std::shared_ptr<Renderer::Material> m_materialEditorMaterial;
         bool m_materialEditorDirty = false;
+        bool m_hasActivePropertyEdit = false;
+        Scene::ObjectID m_activePropertyObjectId = Scene::InvalidObjectID;
+        Scene::ComponentID m_activePropertyComponentId = Scene::InvalidComponentID;
+        std::string m_activePropertyPath;
+        PropertyValue m_activePropertyStartValue;
         std::wstring m_selectedAssetFolder = L"Assets";
         std::wstring m_currentSceneAsset = L"Assets/Scenes/Test.scene";
         std::wstring m_selectedAsset;

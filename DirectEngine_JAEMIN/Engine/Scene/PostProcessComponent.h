@@ -8,6 +8,9 @@ namespace Engine::Scene
     class PostProcessComponent : public Component
     {
     public:
+        static constexpr const char* StaticTypeName = "PostProcess";
+        const char* GetTypeName() const override { return StaticTypeName; }
+
         bool enabled = true;
         Renderer::PostProcessEffect effect = Renderer::PostProcessEffect::None;
         bool grayscaleEnabled = false;

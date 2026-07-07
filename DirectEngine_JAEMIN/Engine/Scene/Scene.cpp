@@ -20,6 +20,13 @@ namespace Engine::Scene
         return result;
     }
 
+    GameObject& Scene::CreateGameObject(const std::string& name, ObjectID id)
+    {
+        GameObject& object = CreateGameObject(name);
+        object.SetID(id);
+        return object;
+    }
+
     bool Scene::DestroyGameObject(GameObject* object)
     {
         auto it = std::find_if(m_gameObjects.begin(), m_gameObjects.end(), [object](const std::unique_ptr<GameObject>& candidate)
@@ -34,6 +41,47 @@ namespace Engine::Scene
 
         m_gameObjects.erase(it);
         return true;
+    }
+
+    GameObject* Scene::FindGameObjectByID(ObjectID id) const
+    {
+        if (id == InvalidObjectID)
+        {
+            return nullptr;
+        }
+
+        for (const std::unique_ptr<GameObject>& object : m_gameObjects)
+        {
+            if (object && object->GetID() == id)
+            {
+                return object.get();
+            }
+        }
+
+        return nullptr;
+    }
+
+    Component* Scene::FindComponentByID(ComponentID id) const
+    {
+        if (id == InvalidComponentID)
+        {
+            return nullptr;
+        }
+
+        for (const std::unique_ptr<GameObject>& object : m_gameObjects)
+        {
+            if (!object)
+            {
+                continue;
+            }
+
+            if (Component* component = object->GetComponentByID(id))
+            {
+                return component;
+            }
+        }
+
+        return nullptr;
     }
 
     void Scene::Update(float deltaTime)

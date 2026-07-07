@@ -8,6 +8,7 @@
 #include "Engine/Scene/LightComponent.h"
 #include "Engine/Scene/PlayerStartComponent.h"
 #include "Engine/Scene/PostProcessComponent.h"
+#include "Engine/Scene/SceneIDs.h"
 
 #include <memory>
 #include <string>
@@ -23,6 +24,7 @@ namespace Engine::Editor
 {
     struct MeshRendererSnapshot
     {
+        Scene::ComponentID componentId = Scene::InvalidComponentID;
         bool enabled = false;
         std::shared_ptr<Renderer::Mesh> mesh;
         std::shared_ptr<Renderer::Material> material;
@@ -34,6 +36,7 @@ namespace Engine::Editor
         Math::Vector4 materialBaseColor = { 1.0f, 1.0f, 1.0f, 1.0f };
         float materialRoughness = 0.5f;
         float materialMetallic = 0.0f;
+        float materialNormalStrength = 1.0f;
         std::shared_ptr<RHI::RHITexture> baseColorTexture;
         std::shared_ptr<RHI::RHITexture> roughnessTexture;
         std::shared_ptr<RHI::RHITexture> metallicTexture;
@@ -47,6 +50,7 @@ namespace Engine::Editor
 
     struct ColliderSnapshot
     {
+        Scene::ComponentID componentId = Scene::InvalidComponentID;
         Physics::ColliderType type = Physics::ColliderType::AABB;
         Math::Vector3 center = { 0.0f, 0.0f, 0.0f };
         Math::Vector3 rotation = { 0.0f, 0.0f, 0.0f };
@@ -57,6 +61,7 @@ namespace Engine::Editor
 
     struct LightSnapshot
     {
+        Scene::ComponentID componentId = Scene::InvalidComponentID;
         bool enabled = false;
         Scene::LightType type = Scene::LightType::Point;
         Math::Vector3 color = { 1.0f, 1.0f, 1.0f };
@@ -70,6 +75,7 @@ namespace Engine::Editor
 
     struct PostProcessSnapshot
     {
+        Scene::ComponentID componentId = Scene::InvalidComponentID;
         bool enabledComponent = false;
         bool enabled = true;
         Renderer::PostProcessEffect effect = Renderer::PostProcessEffect::None;
@@ -90,6 +96,7 @@ namespace Engine::Editor
 
     struct PlayerStartSnapshot
     {
+        Scene::ComponentID componentId = Scene::InvalidComponentID;
         bool enabled = false;
         float playerHeight = 1.7f;
         float moveSpeed = 4.0f;
@@ -99,6 +106,9 @@ namespace Engine::Editor
 
     struct GameObjectSnapshot
     {
+        Scene::ObjectID id = Scene::InvalidObjectID;
+        Scene::ObjectID parentId = Scene::InvalidObjectID;
+        std::vector<Scene::ObjectID> children;
         std::string name = "GameObject";
         std::string outlinerFolder;
         Math::Transform transform;
@@ -110,6 +120,7 @@ namespace Engine::Editor
 
         static GameObjectSnapshot Capture(const Scene::GameObject& object);
         static bool IsDifferent(const GameObjectSnapshot& a, const GameObjectSnapshot& b, float epsilon = 0.0001f);
+        void ClearPersistentIDs();
         void ApplyTo(Scene::GameObject& object) const;
         Scene::GameObject& Restore(Scene::Scene& scene) const;
     };

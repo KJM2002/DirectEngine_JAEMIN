@@ -12,6 +12,7 @@
 #include "Engine/Scene/PlayerStartComponent.h"
 #include "Engine/Scene/PostProcessComponent.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scene/SceneIDs.h"
 
 #include <algorithm>
 #include <cctype>
@@ -37,6 +38,7 @@ namespace Engine::Scene
         {
             struct ColliderDesc
             {
+                ComponentID componentId = InvalidComponentID;
                 Physics::ColliderType type = Physics::ColliderType::AABB;
                 Math::Vector3 center = { 0.0f, 0.0f, 0.0f };
                 Math::Vector3 rotation = { 0.0f, 0.0f, 0.0f };
@@ -45,6 +47,8 @@ namespace Engine::Scene
                 bool isTrigger = false;
             };
 
+            ObjectID id = InvalidObjectID;
+            ObjectID parentId = InvalidObjectID;
             std::string name = "GameObject";
             std::string folder;
             Math::Vector3 position = { 0.0f, 0.0f, 0.0f };
@@ -54,6 +58,8 @@ namespace Engine::Scene
             std::wstring materialPath;
             std::string meshGuid;
             std::string materialGuid;
+            bool hasMeshRenderer = false;
+            ComponentID meshRendererComponentId = InvalidComponentID;
             bool hasInlineMaterial = false;
             std::string materialName;
             std::wstring materialVertexShaderPath = L"Shaders/BasicVertex.hlsl";
@@ -65,7 +71,9 @@ namespace Engine::Scene
             Math::Vector4 materialBaseColor = { 1.0f, 1.0f, 1.0f, 1.0f };
             float materialRoughness = 0.5f;
             float materialMetallic = 0.0f;
+            float materialNormalStrength = 1.0f;
             bool hasLight = false;
+            ComponentID lightComponentId = InvalidComponentID;
             LightType lightType = LightType::Point;
             Math::Vector3 lightColor = { 1.0f, 1.0f, 1.0f };
             Math::Vector3 lightDirection = { 0.0f, -1.0f, 0.0f };
@@ -75,6 +83,7 @@ namespace Engine::Scene
             float innerConeAngle = 20.0f;
             float outerConeAngle = 35.0f;
             bool hasCollider = false;
+            ComponentID pendingColliderComponentId = InvalidComponentID;
             Physics::ColliderType colliderType = Physics::ColliderType::AABB;
             Math::Vector3 colliderCenter = { 0.0f, 0.0f, 0.0f };
             Math::Vector3 colliderRotation = { 0.0f, 0.0f, 0.0f };
@@ -83,6 +92,7 @@ namespace Engine::Scene
             bool colliderIsTrigger = false;
             std::vector<ColliderDesc> colliders;
             bool hasPostProcess = false;
+            ComponentID postProcessComponentId = InvalidComponentID;
             bool postProcessEnabled = true;
             Renderer::PostProcessEffect postProcessEffect = Renderer::PostProcessEffect::None;
             bool postProcessGrayscaleEnabled = false;
@@ -99,11 +109,13 @@ namespace Engine::Scene
             float postProcessContrast = 1.0f;
             float postProcessSaturation = 1.0f;
             bool hasPlayerStart = false;
+            ComponentID playerStartComponentId = InvalidComponentID;
             float playerHeight = 1.7f;
             float playerMoveSpeed = 4.0f;
             float playerFastMoveMultiplier = 3.0f;
             float playerMouseSensitivity = 0.003f;
             bool hasData = false;
+            std::string activeComponentType;
         };
 
         std::string ToNarrowAscii(const std::wstring& value)
@@ -188,6 +200,78 @@ namespace Engine::Scene
         bool ParseBool(const std::string& value)
         {
             return value == "true" || value == "1" || value == "yes";
+        }
+
+        std::uint64_t ParseUInt64(const std::string& value, std::uint64_t fallback = 0)
+        {
+            try
+            {
+                return static_cast<std::uint64_t>(std::stoull(value));
+            }
+            catch (...)
+            {
+                return fallback;
+            }
+        }
+
+        void BeginComponent(ObjectDesc& desc, const std::string& typeName)
+        {
+            desc.activeComponentType = typeName;
+            if (typeName == "MeshRenderer")
+            {
+                desc.hasMeshRenderer = true;
+            }
+            else if (typeName == "Light")
+            {
+                desc.hasLight = true;
+            }
+            else if (typeName == "Collider")
+            {
+                desc.hasCollider = true;
+                desc.colliders.push_back({});
+            }
+            else if (typeName == "PostProcess")
+            {
+                desc.hasPostProcess = true;
+            }
+            else if (typeName == "PlayerStart")
+            {
+                desc.hasPlayerStart = true;
+            }
+        }
+
+        void AssignActiveComponentID(ObjectDesc& desc, ComponentID id)
+        {
+            if (id == InvalidComponentID)
+            {
+                return;
+            }
+
+            if (desc.activeComponentType == "MeshRenderer")
+            {
+                desc.meshRendererComponentId = id;
+            }
+            else if (desc.activeComponentType == "Light")
+            {
+                desc.lightComponentId = id;
+            }
+            else if (desc.activeComponentType == "Collider")
+            {
+                desc.hasCollider = true;
+                if (desc.colliders.empty())
+                {
+                    desc.colliders.push_back({});
+                }
+                desc.colliders.back().componentId = id;
+            }
+            else if (desc.activeComponentType == "PostProcess")
+            {
+                desc.postProcessComponentId = id;
+            }
+            else if (desc.activeComponentType == "PlayerStart")
+            {
+                desc.playerStartComponentId = id;
+            }
         }
 
         LightType ParseLightType(const std::string& value)
@@ -277,7 +361,10 @@ namespace Engine::Scene
                 return;
             }
 
-            GameObject& object = scene.CreateGameObject(desc.name);
+            GameObject& object = desc.id == InvalidObjectID
+                ? scene.CreateGameObject(desc.name)
+                : scene.CreateGameObject(desc.name, desc.id);
+            object.SetParentID(desc.parentId);
             object.SetOutlinerFolder(desc.folder);
             if (!desc.folder.empty())
             {
@@ -287,9 +374,13 @@ namespace Engine::Scene
             object.GetTransform().rotation = desc.rotation;
             object.GetTransform().scale = desc.scale;
 
-            if (!desc.meshPath.empty() || !desc.materialPath.empty() || !desc.meshGuid.empty() || !desc.materialGuid.empty() || desc.hasInlineMaterial)
+            if (desc.hasMeshRenderer || !desc.meshPath.empty() || !desc.materialPath.empty() || !desc.meshGuid.empty() || !desc.materialGuid.empty() || desc.hasInlineMaterial)
             {
                 MeshRendererComponent& meshRenderer = object.AddComponent<MeshRendererComponent>();
+                if (desc.meshRendererComponentId != InvalidComponentID)
+                {
+                    meshRenderer.SetID(desc.meshRendererComponentId);
+                }
                 meshRenderer.SetMeshGuid(desc.meshGuid);
                 meshRenderer.SetMaterialGuid(desc.materialGuid);
                 if (!desc.meshPath.empty())
@@ -312,6 +403,7 @@ namespace Engine::Scene
                         material->SetBaseColor(desc.materialBaseColor);
                         material->SetRoughness(desc.materialRoughness);
                         material->SetMetallic(desc.materialMetallic);
+                        material->SetNormalStrength(desc.materialNormalStrength);
                         material->SetVertexShaderPath(desc.materialVertexShaderPath);
                         material->SetPixelShaderPath(desc.materialPixelShaderPath);
                         if (!desc.materialVertexShaderPath.empty())
@@ -361,6 +453,10 @@ namespace Engine::Scene
             if (desc.hasLight)
             {
                 LightComponent& light = object.AddComponent<LightComponent>();
+                if (desc.lightComponentId != InvalidComponentID)
+                {
+                    light.SetID(desc.lightComponentId);
+                }
                 light.type = desc.lightType;
                 light.color = desc.lightColor;
                 light.direction = desc.lightDirection;
@@ -376,12 +472,23 @@ namespace Engine::Scene
             {
                 if (desc.colliders.empty())
                 {
-                    desc.colliders.push_back({ desc.colliderType, desc.colliderCenter, desc.colliderRotation, desc.colliderSize, desc.colliderRadius, desc.colliderIsTrigger });
+                    ObjectDesc::ColliderDesc collider;
+                    collider.type = desc.colliderType;
+                    collider.center = desc.colliderCenter;
+                    collider.rotation = desc.colliderRotation;
+                    collider.size = desc.colliderSize;
+                    collider.radius = desc.colliderRadius;
+                    collider.isTrigger = desc.colliderIsTrigger;
+                    desc.colliders.push_back(collider);
                 }
 
                 for (const ObjectDesc::ColliderDesc& source : desc.colliders)
                 {
                     Physics::ColliderComponent& collider = object.AddComponent<Physics::ColliderComponent>();
+                    if (source.componentId != InvalidComponentID)
+                    {
+                        collider.SetID(source.componentId);
+                    }
                     collider.type = source.type;
                     collider.center = source.center;
                     collider.rotation = source.rotation;
@@ -394,6 +501,10 @@ namespace Engine::Scene
             if (desc.hasPostProcess)
             {
                 PostProcessComponent& postProcess = object.AddComponent<PostProcessComponent>();
+                if (desc.postProcessComponentId != InvalidComponentID)
+                {
+                    postProcess.SetID(desc.postProcessComponentId);
+                }
                 postProcess.enabled = desc.postProcessEnabled;
                 postProcess.effect = desc.postProcessEffect;
                 postProcess.grayscaleEnabled = desc.postProcessGrayscaleEnabled || desc.postProcessEffect == Renderer::PostProcessEffect::Grayscale;
@@ -415,6 +526,10 @@ namespace Engine::Scene
             if (desc.hasPlayerStart)
             {
                 PlayerStartComponent& playerStart = object.AddComponent<PlayerStartComponent>();
+                if (desc.playerStartComponentId != InvalidComponentID)
+                {
+                    playerStart.SetID(desc.playerStartComponentId);
+                }
                 playerStart.playerHeight = desc.playerHeight;
                 playerStart.moveSpeed = desc.playerMoveSpeed;
                 playerStart.fastMoveMultiplier = desc.playerFastMoveMultiplier;
@@ -498,10 +613,22 @@ namespace Engine::Scene
                     scene.AddOutlinerFolder(value);
                     continue;
                 }
+                if (key == "scene_version")
+                {
+                    continue;
+                }
 
                 if (section == Section::GameObject)
                 {
-                    if (key == "name")
+                    if (key == "id")
+                    {
+                        objectDesc.id = ParseUInt64(value, InvalidObjectID);
+                    }
+                    else if (key == "parent_id")
+                    {
+                        objectDesc.parentId = ParseUInt64(value, InvalidObjectID);
+                    }
+                    else if (key == "name")
                     {
                         objectDesc.name = value;
                     }
@@ -523,90 +650,102 @@ namespace Engine::Scene
                     }
                     else if (key == "mesh")
                     {
+                        objectDesc.hasMeshRenderer = true;
                         objectDesc.meshPath = ToWideAscii(value);
                     }
                     else if (key == "meshGuid")
                     {
+                        objectDesc.hasMeshRenderer = true;
                         objectDesc.meshGuid = value;
                     }
                     else if (key == "material")
                     {
+                        objectDesc.hasMeshRenderer = true;
                         objectDesc.materialPath = ToWideAscii(value);
                     }
                     else if (key == "materialGuid")
                     {
+                        objectDesc.hasMeshRenderer = true;
                         objectDesc.materialGuid = value;
                     }
                     else if (key == "material_inline")
                     {
+                        objectDesc.hasMeshRenderer = true;
                         objectDesc.hasInlineMaterial = ParseBool(value);
                     }
                     else if (key == "material_name")
                     {
+                        objectDesc.hasMeshRenderer = true;
                         objectDesc.hasInlineMaterial = true;
                         objectDesc.materialName = value;
                     }
                     else if (key == "material_vertex_shader")
                     {
+                        objectDesc.hasMeshRenderer = true;
                         objectDesc.hasInlineMaterial = true;
                         objectDesc.materialVertexShaderPath = ToWideAscii(value);
                     }
                     else if (key == "material_pixel_shader")
                     {
+                        objectDesc.hasMeshRenderer = true;
                         objectDesc.hasInlineMaterial = true;
                         objectDesc.materialPixelShaderPath = ToWideAscii(value);
                     }
                     else if (key == "material_base_color")
                     {
+                        objectDesc.hasMeshRenderer = true;
                         objectDesc.hasInlineMaterial = true;
                         ParseVector4(value, objectDesc.materialBaseColor);
                     }
                     else if (key == "material_roughness")
                     {
+                        objectDesc.hasMeshRenderer = true;
                         objectDesc.hasInlineMaterial = true;
                         objectDesc.materialRoughness = std::stof(value);
                     }
                     else if (key == "material_metallic")
                     {
+                        objectDesc.hasMeshRenderer = true;
                         objectDesc.hasInlineMaterial = true;
                         objectDesc.materialMetallic = std::stof(value);
                     }
+                    else if (key == "material_normal_strength")
+                    {
+                        objectDesc.hasMeshRenderer = true;
+                        objectDesc.hasInlineMaterial = true;
+                        objectDesc.materialNormalStrength = std::clamp(std::stof(value), 0.0f, 4.0f);
+                    }
                     else if (key == "material_texture")
                     {
+                        objectDesc.hasMeshRenderer = true;
                         objectDesc.hasInlineMaterial = true;
                         objectDesc.materialTexturePath = ToWideAscii(value);
                     }
                     else if (key == "material_roughness_texture")
                     {
+                        objectDesc.hasMeshRenderer = true;
                         objectDesc.hasInlineMaterial = true;
                         objectDesc.materialRoughnessTexturePath = ToWideAscii(value);
                     }
                     else if (key == "material_metallic_texture")
                     {
+                        objectDesc.hasMeshRenderer = true;
                         objectDesc.hasInlineMaterial = true;
                         objectDesc.materialMetallicTexturePath = ToWideAscii(value);
                     }
                     else if (key == "material_normal_texture")
                     {
+                        objectDesc.hasMeshRenderer = true;
                         objectDesc.hasInlineMaterial = true;
                         objectDesc.materialNormalTexturePath = ToWideAscii(value);
                     }
-                    else if (key == "component" && value == "Light")
+                    else if (key == "component" || key == "component_type")
                     {
-                        objectDesc.hasLight = true;
+                        BeginComponent(objectDesc, value);
                     }
-                    else if (key == "component" && value == "Collider")
+                    else if (key == "component_id")
                     {
-                        objectDesc.hasCollider = true;
-                        objectDesc.colliders.push_back({});
-                    }
-                    else if (key == "component" && value == "PostProcess")
-                    {
-                        objectDesc.hasPostProcess = true;
-                    }
-                    else if (key == "component" && value == "PlayerStart")
-                    {
-                        objectDesc.hasPlayerStart = true;
+                        AssignActiveComponentID(objectDesc, ParseUInt64(value, InvalidComponentID));
                     }
                     else if (key == "light_type")
                     {
@@ -905,6 +1044,7 @@ namespace Engine::Scene
             return false;
         }
 
+        file << "scene_version=1\n";
         file << "scene_name=SavedScene\n";
         for (const std::string& folder : scene.GetOutlinerFolders())
         {
@@ -938,6 +1078,8 @@ namespace Engine::Scene
         for (const std::unique_ptr<GameObject>& object : scene.GetGameObjects())
         {
             file << "[GameObject]\n";
+            file << "id=" << object->GetID() << "\n";
+            file << "parent_id=" << object->GetParentID() << "\n";
             file << "name=" << object->GetName() << "\n";
             if (!object->GetOutlinerFolder().empty())
             {
@@ -950,6 +1092,8 @@ namespace Engine::Scene
             const MeshRendererComponent* meshRenderer = object->GetComponent<MeshRendererComponent>();
             if (meshRenderer)
             {
+                file << "component_type=" << meshRenderer->GetTypeName() << "\n";
+                file << "component_id=" << meshRenderer->GetID() << "\n";
                 if (!meshRenderer->GetMeshPath().empty())
                 {
                     file << "mesh=" << ToNarrowAscii(meshRenderer->GetMeshPath(), L"") << "\n";
@@ -977,6 +1121,7 @@ namespace Engine::Scene
                     WriteVector4(file, "material_base_color", material->GetBaseColor());
                     file << "material_roughness=" << material->GetRoughness() << "\n";
                     file << "material_metallic=" << material->GetMetallic() << "\n";
+                    file << "material_normal_strength=" << material->GetNormalStrength() << "\n";
                     if (!material->GetBaseColorTexturePath().empty())
                     {
                         file << "material_texture=" << ToNarrowAscii(material->GetBaseColorTexturePath(), L"") << "\n";
@@ -999,7 +1144,8 @@ namespace Engine::Scene
             const LightComponent* light = object->GetComponent<LightComponent>();
             if (light)
             {
-                file << "component=Light\n";
+                file << "component_type=" << light->GetTypeName() << "\n";
+                file << "component_id=" << light->GetID() << "\n";
                 file << "light_type=" << ToLightTypeString(light->type) << "\n";
                 WriteVector3(file, "color", light->color);
                 file << "intensity=" << light->intensity << "\n";
@@ -1017,7 +1163,8 @@ namespace Engine::Scene
                     continue;
                 }
 
-                file << "component=Collider\n";
+                file << "component_type=" << collider->GetTypeName() << "\n";
+                file << "component_id=" << collider->GetID() << "\n";
                 file << "collider_type=" << ToColliderTypeString(collider->type) << "\n";
                 WriteVector3(file, "center", collider->center);
                 WriteVector3(file, "collider_rotation", collider->rotation);
@@ -1029,7 +1176,8 @@ namespace Engine::Scene
             const PostProcessComponent* postProcess = object->GetComponent<PostProcessComponent>();
             if (postProcess)
             {
-                file << "component=PostProcess\n";
+                file << "component_type=" << postProcess->GetTypeName() << "\n";
+                file << "component_id=" << postProcess->GetID() << "\n";
                 file << "postprocess_enabled=" << (postProcess->enabled ? "true" : "false") << "\n";
                 file << "postprocess_effect=" << ToPostProcessEffectString(Renderer::PostProcessEffect::None) << "\n";
                 file << "postprocess_grayscale=" << (postProcess->grayscaleEnabled ? "true" : "false") << "\n";
@@ -1050,7 +1198,8 @@ namespace Engine::Scene
             const PlayerStartComponent* playerStart = object->GetComponent<PlayerStartComponent>();
             if (playerStart)
             {
-                file << "component=PlayerStart\n";
+                file << "component_type=" << playerStart->GetTypeName() << "\n";
+                file << "component_id=" << playerStart->GetID() << "\n";
                 file << "player_height=" << playerStart->playerHeight << "\n";
                 file << "player_move_speed=" << playerStart->moveSpeed << "\n";
                 file << "player_fast_multiplier=" << playerStart->fastMoveMultiplier << "\n";

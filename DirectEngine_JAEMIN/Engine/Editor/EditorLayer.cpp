@@ -11,6 +11,7 @@
 #include "Engine/Editor/Command/RenameGameObjectCommand.h"
 #include "Engine/Editor/Command/SetObjectFolderCommand.h"
 #include "Engine/Editor/Command/TransformCommand.h"
+#include "Engine/Editor/Property/PropertySystem.h"
 #include "Engine/Input/Input.h"
 #include "Engine/Graphics/Renderer/Renderer.h"
 #include "Engine/Graphics/Renderer/Material.h"
@@ -42,6 +43,7 @@
 #include <cmath>
 #include <cctype>
 #include <cfloat>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -279,6 +281,22 @@ namespace Engine::Editor
             case GizmoAxis::None:
             default:
                 return { 0.0f, 0.0f, 0.0f };
+            }
+        }
+
+        Renderer::GizmoAxis ToRendererGizmoAxis(GizmoAxis axis)
+        {
+            switch (axis)
+            {
+            case GizmoAxis::X:
+                return Renderer::GizmoAxis::X;
+            case GizmoAxis::Y:
+                return Renderer::GizmoAxis::Y;
+            case GizmoAxis::Z:
+                return Renderer::GizmoAxis::Z;
+            case GizmoAxis::None:
+            default:
+                return Renderer::GizmoAxis::None;
             }
         }
 
@@ -625,6 +643,54 @@ namespace Engine::Editor
             return changed;
         }
 
+        struct TrackedWidgetState
+        {
+            bool changed = false;
+            bool activated = false;
+            bool deactivated = false;
+            bool deactivatedAfterEdit = false;
+        };
+
+        void TrackLastItem(TrackedWidgetState& state)
+        {
+            state.activated = ImGui::IsItemActivated() || state.activated;
+            state.deactivated = ImGui::IsItemDeactivated() || state.deactivated;
+            state.deactivatedAfterEdit = ImGui::IsItemDeactivatedAfterEdit() || state.deactivatedAfterEdit;
+        }
+
+        TrackedWidgetState DragAndInputFloat3Tracked(const char* label, float* values, float speed, float minValue = 0.0f, float maxValue = 0.0f, const char* format = "%.3f")
+        {
+            TrackedWidgetState state;
+            state.changed = ImGui::DragFloat3(label, values, speed, minValue, maxValue, format);
+            TrackLastItem(state);
+            std::string inputLabel = "Input##";
+            inputLabel += label;
+            state.changed = ImGui::InputFloat3(inputLabel.c_str(), values, format) || state.changed;
+            TrackLastItem(state);
+            return state;
+        }
+
+        TrackedWidgetState SliderAndInputFloatTracked(const char* label, float* value, float minValue, float maxValue, const char* format = "%.3f")
+        {
+            TrackedWidgetState state;
+            state.changed = ImGui::SliderFloat(label, value, minValue, maxValue, format);
+            TrackLastItem(state);
+            std::string inputLabel = "Input##";
+            inputLabel += label;
+            state.changed = ImGui::InputFloat(inputLabel.c_str(), value, 0.0f, 0.0f, format) || state.changed;
+            TrackLastItem(state);
+            *value = std::clamp(*value, minValue, maxValue);
+            return state;
+        }
+
+        TrackedWidgetState ColorEdit4Tracked(const char* label, float* value)
+        {
+            TrackedWidgetState state;
+            state.changed = ImGui::ColorEdit4(label, value);
+            TrackLastItem(state);
+            return state;
+        }
+
         std::string StripTrailingDigits(const std::string& name)
         {
             std::size_t end = name.size();
@@ -755,7 +821,70 @@ namespace Engine::Editor
             desc.baseColor = material.GetBaseColor();
             desc.roughness = material.GetRoughness();
             desc.metallic = material.GetMetallic();
+            desc.normalStrength = material.GetNormalStrength();
             return desc;
+        }
+
+        std::shared_ptr<Renderer::Material> CloneMaterialInstance(const std::shared_ptr<Renderer::Material>& material, const std::string& fallbackName)
+        {
+            if (!material)
+            {
+                return nullptr;
+            }
+
+            std::shared_ptr<Renderer::Material> clone = material->Clone();
+            if (clone && clone->GetName().empty())
+            {
+                clone->SetName(fallbackName);
+            }
+            return clone;
+        }
+
+        void CopyMaterialState(const Renderer::Material& source, Renderer::Material& destination)
+        {
+            destination.SetName(source.GetName());
+            destination.SetVertexShader(source.GetVertexShader());
+            destination.SetPixelShader(source.GetPixelShader());
+            destination.SetVertexShaderPath(source.GetVertexShaderPath());
+            destination.SetPixelShaderPath(source.GetPixelShaderPath());
+            destination.SetBaseColor(source.GetBaseColor());
+            destination.SetRoughness(source.GetRoughness());
+            destination.SetMetallic(source.GetMetallic());
+            destination.SetNormalStrength(source.GetNormalStrength());
+            destination.SetBaseColorTexture(source.GetBaseColorTexture());
+            destination.SetRoughnessTexture(source.GetRoughnessTexture());
+            destination.SetMetallicTexture(source.GetMetallicTexture());
+            destination.SetNormalTexture(source.GetNormalTexture());
+            destination.SetBaseColorTexturePath(source.GetBaseColorTexturePath());
+            destination.SetRoughnessTexturePath(source.GetRoughnessTexturePath());
+            destination.SetMetallicTexturePath(source.GetMetallicTexturePath());
+            destination.SetNormalTexturePath(source.GetNormalTexturePath());
+        }
+
+        Renderer::Material* EnsureEditableMaterialInstance(Scene::MeshRendererComponent& meshRenderer, const std::string& fallbackName)
+        {
+            std::shared_ptr<Renderer::Material> material = meshRenderer.GetMaterial();
+            if (!material)
+            {
+                return nullptr;
+            }
+
+            const bool hasAssetReference = !meshRenderer.GetMaterialGuid().empty()
+                || (!meshRenderer.GetMaterialPath().empty()
+                    && HasExtension(std::filesystem::path(meshRenderer.GetMaterialPath()), { L".mat" }));
+            if (material.use_count() > 1)
+            {
+                material = CloneMaterialInstance(material, fallbackName);
+                meshRenderer.SetMaterial(material);
+            }
+
+            if (hasAssetReference)
+            {
+                meshRenderer.SetMaterialPath({});
+                meshRenderer.SetMaterialGuid({});
+            }
+
+            return material.get();
         }
 
         const char* ToMaterialTextureSlotName(MaterialTextureSlot slot)
@@ -797,6 +926,143 @@ namespace Engine::Editor
             }
         }
 
+        enum class PrimitiveShape
+        {
+            Cube,
+            Sphere,
+            Cylinder,
+            Cone,
+            Plane
+        };
+
+        const char* ToPrimitiveShapeName(PrimitiveShape shape)
+        {
+            switch (shape)
+            {
+            case PrimitiveShape::Sphere:
+                return "Sphere";
+            case PrimitiveShape::Cylinder:
+                return "Cylinder";
+            case PrimitiveShape::Cone:
+                return "Cone";
+            case PrimitiveShape::Plane:
+                return "Plane";
+            case PrimitiveShape::Cube:
+            default:
+                return "Cube";
+            }
+        }
+
+        const char* ToPrimitiveShapeKey(PrimitiveShape shape)
+        {
+            switch (shape)
+            {
+            case PrimitiveShape::Sphere:
+                return "sphere";
+            case PrimitiveShape::Cylinder:
+                return "cylinder";
+            case PrimitiveShape::Cone:
+                return "cone";
+            case PrimitiveShape::Plane:
+                return "plane";
+            case PrimitiveShape::Cube:
+            default:
+                return "cube";
+            }
+        }
+
+        std::wstring GetPrimitiveMeshPath(PrimitiveShape shape)
+        {
+            switch (shape)
+            {
+            case PrimitiveShape::Sphere:
+                return L"builtin:mesh:sphere";
+            case PrimitiveShape::Cylinder:
+                return L"builtin:mesh:cylinder";
+            case PrimitiveShape::Cone:
+                return L"builtin:mesh:cone";
+            case PrimitiveShape::Plane:
+                return L"builtin:mesh:plane";
+            case PrimitiveShape::Cube:
+            default:
+                return L"builtin:mesh:cube";
+            }
+        }
+
+        Math::Vector4 GetPrimitiveMaterialColor(PrimitiveShape shape)
+        {
+            switch (shape)
+            {
+            case PrimitiveShape::Sphere:
+                return { 0.68f, 0.84f, 1.0f, 1.0f };
+            case PrimitiveShape::Cylinder:
+                return { 0.78f, 0.95f, 0.74f, 1.0f };
+            case PrimitiveShape::Cone:
+                return { 1.0f, 0.78f, 0.56f, 1.0f };
+            case PrimitiveShape::Plane:
+                return { 0.86f, 0.86f, 0.86f, 1.0f };
+            case PrimitiveShape::Cube:
+            default:
+                return { 1.0f, 1.0f, 1.0f, 1.0f };
+            }
+        }
+
+        std::shared_ptr<Renderer::Mesh> CreatePrimitiveMesh(Resource::ResourceManager& resources, PrimitiveShape shape)
+        {
+            switch (shape)
+            {
+            case PrimitiveShape::Sphere:
+                return resources.CreateSphereMesh();
+            case PrimitiveShape::Cylinder:
+                return resources.CreateCylinderMesh();
+            case PrimitiveShape::Cone:
+                return resources.CreateConeMesh();
+            case PrimitiveShape::Plane:
+                return resources.CreatePlaneMesh();
+            case PrimitiveShape::Cube:
+            default:
+                return resources.CreateCubeMesh();
+            }
+        }
+
+        ColliderSnapshot CreatePrimitiveCollider(PrimitiveShape shape)
+        {
+            ColliderSnapshot collider;
+            if (shape == PrimitiveShape::Sphere)
+            {
+                collider.type = Physics::ColliderType::Sphere;
+                collider.radius = 0.5f;
+                collider.size = { 1.0f, 1.0f, 1.0f };
+                return collider;
+            }
+            if (shape == PrimitiveShape::Plane)
+            {
+                collider.size = { 1.0f, 0.02f, 1.0f };
+                return collider;
+            }
+
+            collider.size = { 1.0f, 1.0f, 1.0f };
+            return collider;
+        }
+
+        void ConfigurePrimitiveSnapshot(GameObjectSnapshot& snapshot, Resource::ResourceManager& resources, PrimitiveShape shape)
+        {
+            const std::string shapeKey = ToPrimitiveShapeKey(shape);
+            const Math::Vector4 materialColor = GetPrimitiveMaterialColor(shape);
+            snapshot.name = ToPrimitiveShapeName(shape);
+            snapshot.meshRenderer.enabled = true;
+            snapshot.meshRenderer.mesh = CreatePrimitiveMesh(resources, shape);
+            snapshot.meshRenderer.material = resources.CreateMaterial("editor:material:" + shapeKey, materialColor);
+            snapshot.meshRenderer.meshPath = GetPrimitiveMeshPath(shape);
+            snapshot.meshRenderer.materialPath = ToWideAscii("editor:material:" + shapeKey);
+            snapshot.meshRenderer.hasMaterialState = true;
+            snapshot.meshRenderer.materialBaseColor = materialColor;
+            snapshot.meshRenderer.materialRoughness = 0.5f;
+            snapshot.meshRenderer.materialMetallic = 0.0f;
+            snapshot.meshRenderer.materialNormalStrength = 1.0f;
+            snapshot.colliders.push_back(CreatePrimitiveCollider(shape));
+        }
+
         const char* GetAssetTypeLabel(const std::wstring& asset)
         {
             const std::filesystem::path path(asset);
@@ -835,6 +1101,60 @@ namespace Engine::Editor
             return HasExtension(path, { L".obj", L".mat", L".scene", L".png", L".jpg", L".jpeg", L".bmp", L".tga" });
         }
 
+        ImTextureRef MakeExternalTextureRef(void* nativeTexture)
+        {
+            return ImTextureRef(static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(nativeTexture)));
+        }
+
+        const char* GetAssetDragPayloadType(const std::filesystem::path& path)
+        {
+            if (HasExtension(path, { L".png", L".jpg", L".jpeg", L".bmp", L".tga" }))
+            {
+                return "ASSET_TEXTURE";
+            }
+            if (HasExtension(path, { L".mat" }))
+            {
+                return "ASSET_MATERIAL";
+            }
+            return nullptr;
+        }
+
+        void EmitAssetDragDropSource(const char* payloadType, const std::wstring& asset)
+        {
+            if (!payloadType || !ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID))
+            {
+                return;
+            }
+
+            ImGui::SetDragDropPayload(payloadType, asset.c_str(), (asset.size() + 1) * sizeof(wchar_t));
+            const std::string display = ToNarrowAscii(asset);
+            ImGui::TextUnformatted(display.c_str());
+            ImGui::EndDragDropSource();
+        }
+
+        std::wstring ReadWideAssetPayload(const ImGuiPayload* payload)
+        {
+            if (!payload || !payload->Data || payload->DataSize <= 0)
+            {
+                return {};
+            }
+
+            const int wcharCount = payload->DataSize / static_cast<int>(sizeof(wchar_t));
+            if (wcharCount <= 0)
+            {
+                return {};
+            }
+
+            const wchar_t* data = static_cast<const wchar_t*>(payload->Data);
+            int length = wcharCount;
+            while (length > 0 && data[length - 1] == L'\0')
+            {
+                --length;
+            }
+
+            return length > 0 ? std::wstring(data, data + length) : std::wstring();
+        }
+
         std::wstring NormalizeAssetPath(const std::wstring& path)
         {
             return std::filesystem::path(path).lexically_normal().generic_wstring();
@@ -851,6 +1171,7 @@ namespace Engine::Editor
             clone->SetBaseColor(source.GetBaseColor());
             clone->SetRoughness(source.GetRoughness());
             clone->SetMetallic(source.GetMetallic());
+            clone->SetNormalStrength(source.GetNormalStrength());
             clone->SetBaseColorTexture(source.GetBaseColorTexture());
             clone->SetRoughnessTexture(source.GetRoughnessTexture());
             clone->SetMetallicTexture(source.GetMetallicTexture());
@@ -1001,6 +1322,7 @@ namespace Engine::Editor
 
         if (m_activeGizmoAxis != GizmoAxis::None)
         {
+            m_hoveredGizmoAxis = m_activeGizmoAxis;
             if (input.GetMouseButtonRaw(Input::MouseButtonLeft) && m_selectedObject && scene.GetActiveCamera())
             {
                 ApplyGizmoDrag(*scene.GetActiveCamera(), input, io.DisplaySize.x, io.DisplaySize.y);
@@ -1019,20 +1341,31 @@ namespace Engine::Editor
             if (input.GetKeyDown(Input::KeyW))
             {
                 m_gizmoMode = GizmoMode::Move;
+                m_showGizmoTools = true;
             }
             else if (input.GetKeyDown(Input::KeyR))
             {
                 m_gizmoMode = GizmoMode::Rotate;
+                m_showGizmoTools = true;
             }
             else if (input.GetKeyDown(Input::KeyS))
             {
                 m_gizmoMode = GizmoMode::Scale;
+                m_showGizmoTools = true;
             }
+        }
+
+        m_hoveredGizmoAxis = GizmoAxis::None;
+        if (!mouseOverEditorUi && m_showGizmoTools && m_selectedObject && scene.GetActiveCamera())
+        {
+            m_hoveredGizmoAxis = PickGizmoAxis(*scene.GetActiveCamera(), input.GetMouseX(), input.GetMouseY(), io.DisplaySize.x, io.DisplaySize.y);
         }
 
         if (!mouseOverEditorUi && m_showGizmoTools && m_selectedObject && input.GetMouseButtonDownRaw(Input::MouseButtonLeft) && scene.GetActiveCamera())
         {
-            m_activeGizmoAxis = PickGizmoAxis(*scene.GetActiveCamera(), input.GetMouseX(), input.GetMouseY(), io.DisplaySize.x, io.DisplaySize.y);
+            m_activeGizmoAxis = m_hoveredGizmoAxis != GizmoAxis::None
+                ? m_hoveredGizmoAxis
+                : PickGizmoAxis(*scene.GetActiveCamera(), input.GetMouseX(), input.GetMouseY(), io.DisplaySize.x, io.DisplaySize.y);
             if (m_activeGizmoAxis != GizmoAxis::None)
             {
                 if (altPressed)
@@ -1170,6 +1503,15 @@ namespace Engine::Editor
                 ImGui::MenuItem("Show Colliders", nullptr, &m_showColliders);
                 ImGui::MenuItem("Asset Browser", nullptr, &m_showAssetBrowser);
                 ImGui::MenuItem("Gizmo Tools", nullptr, &m_showGizmoTools);
+                if (ImGui::BeginMenu("Selection Outline"))
+                {
+                    ImGui::MenuItem("Screen Space", nullptr, &m_screenSelectionOutline);
+                    ImGui::MenuItem("Debug Lines", nullptr, &m_debugSelectionOutline);
+                    ImGui::ColorEdit4("Color", m_selectionOutlineColor.data(), ImGuiColorEditFlags_NoInputs);
+                    ImGui::SliderFloat("Width", &m_selectionOutlineWidth, 1.0f, 16.0f, "%.1f px");
+                    ImGui::SliderFloat("Opacity", &m_selectionOutlineOpacity, 0.0f, 1.0f, "%.2f");
+                    ImGui::EndMenu();
+                }
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("Edit"))
@@ -1522,40 +1864,91 @@ namespace Engine::Editor
                 ImGui::Text("Selected: %d objects", static_cast<int>(m_selectedObjects.size()));
             }
             ImGui::TextUnformatted(m_selectedObject->GetName().c_str());
+
+            auto trackPropertyEdit = [&](Scene::ObjectID objectId,
+                Scene::ComponentID componentId,
+                const std::string& propertyPath,
+                const PropertyValue& valueBeforeWidget,
+                const PropertyValue& valueAfterWidget,
+                const TrackedWidgetState& widgetState)
+            {
+                if (widgetState.activated)
+                {
+                    m_hasActivePropertyEdit = true;
+                    m_activePropertyObjectId = objectId;
+                    m_activePropertyComponentId = componentId;
+                    m_activePropertyPath = propertyPath;
+                    m_activePropertyStartValue = valueBeforeWidget;
+                }
+
+                if (widgetState.changed)
+                {
+                    scene.MarkDirty();
+                }
+
+                const bool sameProperty = m_hasActivePropertyEdit
+                    && m_activePropertyObjectId == objectId
+                    && m_activePropertyComponentId == componentId
+                    && m_activePropertyPath == propertyPath;
+
+                if (widgetState.deactivatedAfterEdit)
+                {
+                    const PropertyValue oldValue = sameProperty ? m_activePropertyStartValue : valueBeforeWidget;
+                    PropertySystem::SetProperty(*m_commandManager, scene, objectId, componentId, propertyPath, oldValue, valueAfterWidget);
+                    m_hasActivePropertyEdit = false;
+                    m_activePropertyObjectId = Scene::InvalidObjectID;
+                    m_activePropertyComponentId = Scene::InvalidComponentID;
+                    m_activePropertyPath.clear();
+                }
+                else if (widgetState.deactivated && sameProperty)
+                {
+                    m_hasActivePropertyEdit = false;
+                    m_activePropertyObjectId = Scene::InvalidObjectID;
+                    m_activePropertyComponentId = Scene::InvalidComponentID;
+                    m_activePropertyPath.clear();
+                }
+            };
+
             Math::Transform& transform = m_selectedObject->GetTransform();
-            const Math::Transform transformBeforeInspector = transform;
-            bool inspectorTransformChanged = false;
-            inspectorTransformChanged = DragAndInputFloat3("Position", &transform.position.x, 0.05f) || inspectorTransformChanged;
+            const Scene::ObjectID selectedObjectId = m_selectedObject->GetID();
+            Math::Vector3 position = transform.position;
+            const Math::Vector3 positionBefore = position;
+            const TrackedWidgetState positionState = DragAndInputFloat3Tracked("Position", &position.x, 0.05f);
+            if (positionState.changed)
+            {
+                transform.position = position;
+            }
+            trackPropertyEdit(selectedObjectId, Scene::InvalidComponentID, "Transform.Position", positionBefore, transform.position, positionState);
+
             Math::Vector3 rotationDegrees =
             {
                 DirectX::XMConvertToDegrees(transform.rotation.x),
                 DirectX::XMConvertToDegrees(transform.rotation.y),
                 DirectX::XMConvertToDegrees(transform.rotation.z)
             };
-            inspectorTransformChanged = DragAndInputFloat3("Rotation (deg)", &rotationDegrees.x, 1.0f) || inspectorTransformChanged;
-            transform.rotation =
+            const Math::Vector3 rotationBefore = transform.rotation;
+            const TrackedWidgetState rotationState = DragAndInputFloat3Tracked("Rotation (deg)", &rotationDegrees.x, 1.0f);
+            if (rotationState.changed)
             {
-                DirectX::XMConvertToRadians(rotationDegrees.x),
-                DirectX::XMConvertToRadians(rotationDegrees.y),
-                DirectX::XMConvertToRadians(rotationDegrees.z)
-            };
-            inspectorTransformChanged = DragAndInputFloat3("Scale", &transform.scale.x, 0.05f, 0.01f, 100.0f) || inspectorTransformChanged;
-            transform.scale.x = std::max(0.01f, transform.scale.x);
-            transform.scale.y = std::max(0.01f, transform.scale.y);
-            transform.scale.z = std::max(0.01f, transform.scale.z);
-            if (inspectorTransformChanged && !m_inspectorTransformObject)
-            {
-                m_inspectorTransformObject = m_selectedObject;
-                m_inspectorTransformStart = transformBeforeInspector;
-            }
-            if (m_inspectorTransformObject && !ImGui::IsAnyItemActive())
-            {
-                if (TransformCommand::IsDifferent(m_inspectorTransformStart, m_inspectorTransformObject->GetTransform()))
+                transform.rotation =
                 {
-                    m_commandManager->ExecuteCommand(std::make_unique<TransformCommand>(*m_inspectorTransformObject, m_inspectorTransformStart, m_inspectorTransformObject->GetTransform()));
-                }
-                m_inspectorTransformObject = nullptr;
+                    DirectX::XMConvertToRadians(rotationDegrees.x),
+                    DirectX::XMConvertToRadians(rotationDegrees.y),
+                    DirectX::XMConvertToRadians(rotationDegrees.z)
+                };
             }
+            trackPropertyEdit(selectedObjectId, Scene::InvalidComponentID, "Transform.Rotation", rotationBefore, transform.rotation, rotationState);
+
+            Math::Vector3 scale = transform.scale;
+            const Math::Vector3 scaleBefore = scale;
+            const TrackedWidgetState scaleState = DragAndInputFloat3Tracked("Scale", &scale.x, 0.05f, 0.01f, 100.0f);
+            if (scaleState.changed)
+            {
+                transform.scale.x = std::max(0.01f, scale.x);
+                transform.scale.y = std::max(0.01f, scale.y);
+                transform.scale.z = std::max(0.01f, scale.z);
+            }
+            trackPropertyEdit(selectedObjectId, Scene::InvalidComponentID, "Transform.Scale", scaleBefore, transform.scale, scaleState);
 
             auto applyInspectorSnapshotEdit = [&](const GameObjectSnapshot& before, const GameObjectSnapshot& after, const char* notification)
             {
@@ -1593,6 +1986,7 @@ namespace Engine::Editor
                 after.meshRenderer.materialBaseColor = { 1.0f, 1.0f, 1.0f, 1.0f };
                 after.meshRenderer.materialRoughness = 0.5f;
                 after.meshRenderer.materialMetallic = 0.0f;
+                after.meshRenderer.materialNormalStrength = 1.0f;
                 applyInspectorSnapshotEdit(before, after, "Added Mesh Renderer.");
             };
 
@@ -1682,72 +2076,90 @@ namespace Engine::Editor
                 {
                 const std::string meshPath = ToNarrowAscii(meshRenderer->GetMeshPath());
                 const std::string materialPath = ToNarrowAscii(meshRenderer->GetMaterialPath());
+                const Renderer::Material* assignedMaterial = meshRenderer->GetMaterial().get();
                 ImGui::Text("Mesh: %s", meshPath.empty() ? "(runtime)" : meshPath.c_str());
-                ImGui::Text("Material: %s", materialPath.empty() ? "(runtime)" : materialPath.c_str());
+                ImGui::TextUnformatted("Material");
+                ImGui::SameLine(110.0f);
+                std::string materialButtonText = materialPath;
+                if (materialButtonText.empty() && assignedMaterial)
+                {
+                    materialButtonText = assignedMaterial->GetName().empty() ? "(runtime material)" : assignedMaterial->GetName();
+                }
+                if (materialButtonText.empty())
+                {
+                    materialButtonText = "(drop material here)";
+                }
+                ImGui::Button(materialButtonText.c_str(), ImVec2(-80.0f, 0.0f));
                 if (ImGui::BeginDragDropTarget())
                 {
-                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_TEXTURE"))
+                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_MATERIAL"))
                     {
-                        const std::wstring texturePath(static_cast<const wchar_t*>(payload->Data));
-                        inspectorEditChanged = ApplyTextureToSelectedMaterial(renderer, texturePath) || inspectorEditChanged;
+                        const std::wstring droppedMaterialPath = ReadWideAssetPayload(payload);
+                        if (!droppedMaterialPath.empty() && ApplyMaterialToSelectedObjects(renderer, droppedMaterialPath))
+                        {
+                            scene.MarkDirty();
+                            ShowNotification("Applied material.");
+                        }
+                        else
+                        {
+                            ShowNotification("Failed to load material.");
+                        }
                     }
                     ImGui::EndDragDropTarget();
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Clear", ImVec2(64.0f, 0.0f)))
+                {
+                    GameObjectSnapshot before = GameObjectSnapshot::Capture(*m_selectedObject);
+                    meshRenderer->SetMaterial(nullptr);
+                    meshRenderer->SetMaterialPath({});
+                    meshRenderer->SetMaterialGuid({});
+                    GameObjectSnapshot after = GameObjectSnapshot::Capture(*m_selectedObject);
+                    applyInspectorSnapshotEdit(before, after, "Cleared material.");
                 }
 
                 if (Renderer::Material* material = meshRenderer->GetMaterial().get())
                 {
+                    const std::string materialInstanceName = "MaterialInstance:" + m_selectedObject->GetName();
+                    const Scene::ComponentID meshRendererId = meshRenderer->GetID();
                     Math::Vector4 baseColor = material->GetBaseColor();
-                    if (ImGui::ColorEdit4("Base Color", &baseColor.x))
+                    const Math::Vector4 baseColorBefore = baseColor;
+                    const TrackedWidgetState baseColorState = ColorEdit4Tracked("Base Color", &baseColor.x);
+                    if (baseColorState.changed)
                     {
-                        material->SetBaseColor(baseColor);
-                        inspectorEditChanged = true;
+                        if (Renderer::Material* editableMaterial = EnsureEditableMaterialInstance(*meshRenderer, materialInstanceName))
+                        {
+                            material = editableMaterial;
+                            material->SetBaseColor(baseColor);
+                        }
                     }
+                    trackPropertyEdit(selectedObjectId, meshRendererId, "MeshRenderer.Material.BaseColor", baseColorBefore, material->GetBaseColor(), baseColorState);
 
                     float roughness = material->GetRoughness();
-                    inspectorEditChanged = SliderAndInputFloat("Roughness", &roughness, 0.0f, 1.0f) || inspectorEditChanged;
-                    if (roughness != material->GetRoughness())
+                    const float roughnessBefore = roughness;
+                    const TrackedWidgetState roughnessState = SliderAndInputFloatTracked("Roughness", &roughness, 0.0f, 1.0f);
+                    if (roughnessState.changed)
                     {
-                        material->SetRoughness(roughness);
+                        if (Renderer::Material* editableMaterial = EnsureEditableMaterialInstance(*meshRenderer, materialInstanceName))
+                        {
+                            material = editableMaterial;
+                            material->SetRoughness(roughness);
+                        }
                     }
+                    trackPropertyEdit(selectedObjectId, meshRendererId, "MeshRenderer.Material.Roughness", roughnessBefore, material->GetRoughness(), roughnessState);
 
                     float metallic = material->GetMetallic();
-                    inspectorEditChanged = SliderAndInputFloat("Metallic", &metallic, 0.0f, 1.0f) || inspectorEditChanged;
-                    if (metallic != material->GetMetallic())
+                    const float metallicBefore = metallic;
+                    const TrackedWidgetState metallicState = SliderAndInputFloatTracked("Metallic", &metallic, 0.0f, 1.0f);
+                    if (metallicState.changed)
                     {
-                        material->SetMetallic(metallic);
+                        if (Renderer::Material* editableMaterial = EnsureEditableMaterialInstance(*meshRenderer, materialInstanceName))
+                        {
+                            material = editableMaterial;
+                            material->SetMetallic(metallic);
+                        }
                     }
-
-                    auto drawTextureSlot = [&](MaterialTextureSlot slot)
-                    {
-                        const std::wstring& path = GetMaterialTextureSlotPath(*material, slot);
-                        const std::string pathText = ToNarrowAscii(path);
-                        ImGui::PushID(ToMaterialTextureSlotName(slot));
-                        ImGui::Text("%s Map", ToMaterialTextureSlotName(slot));
-                        ImGui::SameLine(110.0f);
-                        const std::string buttonText = pathText.empty() ? "(drop texture here)" : pathText;
-                        ImGui::Button(buttonText.c_str(), ImVec2(-70.0f, 0.0f));
-                        if (ImGui::BeginDragDropTarget())
-                        {
-                            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_TEXTURE"))
-                            {
-                                const std::wstring texturePath(static_cast<const wchar_t*>(payload->Data));
-                                inspectorEditChanged = ApplyTextureToSelectedMaterial(renderer, texturePath, slot) || inspectorEditChanged;
-                            }
-                            ImGui::EndDragDropTarget();
-                        }
-                        ImGui::SameLine();
-                        if (ImGui::Button("Clear", ImVec2(60.0f, 0.0f)))
-                        {
-                            inspectorEditChanged = ClearSelectedMaterialTextureSlot(slot) || inspectorEditChanged;
-                        }
-                        ImGui::PopID();
-                    };
-
-                    ImGui::SeparatorText("Texture Slots");
-                    drawTextureSlot(MaterialTextureSlot::BaseColor);
-                    drawTextureSlot(MaterialTextureSlot::Roughness);
-                    drawTextureSlot(MaterialTextureSlot::Metallic);
-                    drawTextureSlot(MaterialTextureSlot::Normal);
+                    trackPropertyEdit(selectedObjectId, meshRendererId, "MeshRenderer.Material.Metallic", metallicBefore, material->GetMetallic(), metallicState);
 
                     const bool hasMaterialAssetPath = !meshRenderer->GetMaterialPath().empty()
                         && HasExtension(std::filesystem::path(meshRenderer->GetMaterialPath()), { L".mat" });
@@ -1964,7 +2376,7 @@ namespace Engine::Editor
             RenderAssetBrowser(scene, renderer);
         }
         RenderModelEditor(scene, renderer);
-        RenderMaterialEditor(renderer);
+        RenderMaterialEditor(scene, renderer);
         m_staticMeshEditor.OnImGuiRender(renderer);
 
         drawSplitter("##RightPanelSplitter",
@@ -2068,6 +2480,20 @@ namespace Engine::Editor
             }
         }
         renderer.SetPostProcessSettings(settings);
+
+        Renderer::SelectionOutlineSettings outlineSettings;
+        outlineSettings.enabled = m_screenSelectionOutline;
+        outlineSettings.debugLineEnabled = m_debugSelectionOutline;
+        outlineSettings.color =
+        {
+            m_selectionOutlineColor[0],
+            m_selectionOutlineColor[1],
+            m_selectionOutlineColor[2],
+            m_selectionOutlineColor[3]
+        };
+        outlineSettings.width = m_selectionOutlineWidth;
+        outlineSettings.opacity = m_selectionOutlineOpacity;
+        renderer.SetSelectionOutlineSettings(outlineSettings);
     }
 
     void EditorLayer::ValidateSelection(const Scene::Scene& scene)
@@ -2200,6 +2626,12 @@ namespace Engine::Editor
     {
         m_selectedObject = object;
         m_selectedObjects.clear();
+        m_hoveredGizmoAxis = GizmoAxis::None;
+        m_activeGizmoAxis = GizmoAxis::None;
+        m_hasActivePropertyEdit = false;
+        m_activePropertyObjectId = Scene::InvalidObjectID;
+        m_activePropertyComponentId = Scene::InvalidComponentID;
+        m_activePropertyPath.clear();
         if (object)
         {
             m_selectedObjects.push_back(object);
@@ -2283,8 +2715,8 @@ namespace Engine::Editor
         }
 
         Resource::ResourceManager& resources = renderer.GetResourceManager();
-        std::shared_ptr<Renderer::Material> material = resources.LoadMaterial(materialPath);
-        if (!material)
+        std::shared_ptr<Renderer::Material> sourceMaterial = resources.LoadMaterial(materialPath);
+        if (!sourceMaterial)
         {
             return false;
         }
@@ -2305,7 +2737,8 @@ namespace Engine::Editor
                 meshRenderer->SetMeshPath(L"builtin:mesh:cube");
             }
 
-            meshRenderer->SetMaterial(material);
+            std::shared_ptr<Renderer::Material> material = CloneMaterialInstance(sourceMaterial, "MaterialInstance:" + object->GetName());
+            meshRenderer->SetMaterial(material ? material : sourceMaterial);
             meshRenderer->SetMaterialPath(materialPath);
             meshRenderer->SetMaterialGuid(materialGuid);
         }
@@ -3261,15 +3694,17 @@ namespace Engine::Editor
             if (!meshRenderer->GetMaterial())
             {
                 meshRenderer->SetMaterial(resources.CreateMaterial("editor:material:auto_texture:" + object->GetName(), { 1.0f, 1.0f, 1.0f, 1.0f }));
-                meshRenderer->SetMaterialPath(L"editor:material:auto_texture");
+                meshRenderer->SetMaterialPath({});
+                meshRenderer->SetMaterialGuid({});
             }
 
-            if (!meshRenderer->GetMaterial())
+            Renderer::Material* material = EnsureEditableMaterialInstance(*meshRenderer, "MaterialInstance:" + object->GetName());
+            if (!material)
             {
                 continue;
             }
 
-            applied = ApplyTextureToMaterial(renderer, *meshRenderer->GetMaterial(), texturePath, slot) || applied;
+            applied = ApplyTextureToMaterial(renderer, *material, texturePath, slot) || applied;
         }
 
         if (applied)
@@ -3337,7 +3772,13 @@ namespace Engine::Editor
                 continue;
             }
 
-            cleared = ClearMaterialTextureSlot(*meshRenderer->GetMaterial(), slot) || cleared;
+            Renderer::Material* material = EnsureEditableMaterialInstance(*meshRenderer, "MaterialInstance:" + object->GetName());
+            if (!material)
+            {
+                continue;
+            }
+
+            cleared = ClearMaterialTextureSlot(*material, slot) || cleared;
         }
 
         if (cleared)
@@ -3437,7 +3878,53 @@ namespace Engine::Editor
         return true;
     }
 
-    void EditorLayer::RenderMaterialEditor(Renderer::Renderer& renderer)
+    void EditorLayer::SyncMaterialEditorMaterialToScene(Scene::Scene& scene)
+    {
+        if (m_materialEditorAsset.empty() || !m_materialEditorMaterial)
+        {
+            return;
+        }
+
+        const std::wstring normalizedEditorAsset = NormalizeAssetPath(m_materialEditorAsset);
+        const std::string editorMaterialGuid = m_assetDatabase.GetGuidFromPath(m_materialEditorAsset);
+        bool changedAnyReference = false;
+
+        for (const std::unique_ptr<Scene::GameObject>& object : scene.GetGameObjects())
+        {
+            if (!object)
+            {
+                continue;
+            }
+
+            Scene::MeshRendererComponent* meshRenderer = object->GetComponent<Scene::MeshRendererComponent>();
+            if (!meshRenderer || !meshRenderer->GetMaterial())
+            {
+                continue;
+            }
+
+            const bool pathMatches = !meshRenderer->GetMaterialPath().empty()
+                && NormalizeAssetPath(meshRenderer->GetMaterialPath()) == normalizedEditorAsset;
+            const bool guidMatches = !editorMaterialGuid.empty()
+                && !meshRenderer->GetMaterialGuid().empty()
+                && meshRenderer->GetMaterialGuid() == editorMaterialGuid;
+            if (!pathMatches && !guidMatches)
+            {
+                continue;
+            }
+
+            CopyMaterialState(*m_materialEditorMaterial, *meshRenderer->GetMaterial());
+            meshRenderer->SetMaterialPath(m_materialEditorAsset);
+            meshRenderer->SetMaterialGuid(editorMaterialGuid);
+            changedAnyReference = true;
+        }
+
+        if (changedAnyReference)
+        {
+            scene.MarkDirty();
+        }
+    }
+
+    void EditorLayer::RenderMaterialEditor(Scene::Scene& scene, Renderer::Renderer& renderer)
     {
         if (!m_showMaterialEditor)
         {
@@ -3463,12 +3950,14 @@ namespace Engine::Editor
         Renderer::Material& material = *m_materialEditorMaterial;
         ImGui::Text("Asset: %s", ToNarrowAscii(m_materialEditorAsset).c_str());
         ImGui::Separator();
+        bool materialChangedThisFrame = false;
 
         Math::Vector4 baseColor = material.GetBaseColor();
         if (ImGui::ColorEdit4("Base Color", &baseColor.x))
         {
             material.SetBaseColor(baseColor);
             m_materialEditorDirty = true;
+            materialChangedThisFrame = true;
         }
 
         float roughness = material.GetRoughness();
@@ -3476,6 +3965,7 @@ namespace Engine::Editor
         {
             material.SetRoughness(roughness);
             m_materialEditorDirty = true;
+            materialChangedThisFrame = true;
         }
 
         float metallic = material.GetMetallic();
@@ -3483,6 +3973,15 @@ namespace Engine::Editor
         {
             material.SetMetallic(metallic);
             m_materialEditorDirty = true;
+            materialChangedThisFrame = true;
+        }
+
+        float normalStrength = material.GetNormalStrength();
+        if (SliderAndInputFloat("Normal Strength", &normalStrength, 0.0f, 4.0f))
+        {
+            material.SetNormalStrength(normalStrength);
+            m_materialEditorDirty = true;
+            materialChangedThisFrame = true;
         }
 
         ImGui::SeparatorText("Texture Slots");
@@ -3499,15 +3998,22 @@ namespace Engine::Editor
             {
                 if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_TEXTURE"))
                 {
-                    const std::wstring texturePath(static_cast<const wchar_t*>(payload->Data));
-                    m_materialEditorDirty = ApplyTextureToMaterial(renderer, material, texturePath, slot) || m_materialEditorDirty;
+                    const std::wstring texturePath = ReadWideAssetPayload(payload);
+                    if (!texturePath.empty())
+                    {
+                        const bool changed = ApplyTextureToMaterial(renderer, material, texturePath, slot);
+                        m_materialEditorDirty = changed || m_materialEditorDirty;
+                        materialChangedThisFrame = changed || materialChangedThisFrame;
+                    }
                 }
                 ImGui::EndDragDropTarget();
             }
             ImGui::SameLine();
             if (ImGui::Button("Clear", ImVec2(60.0f, 0.0f)))
             {
-                m_materialEditorDirty = ClearMaterialTextureSlot(material, slot) || m_materialEditorDirty;
+                const bool changed = ClearMaterialTextureSlot(material, slot);
+                m_materialEditorDirty = changed || m_materialEditorDirty;
+                materialChangedThisFrame = changed || materialChangedThisFrame;
             }
 
             const std::shared_ptr<RHI::RHITexture>* texture = nullptr;
@@ -3530,7 +4036,7 @@ namespace Engine::Editor
 
             if (texture && *texture && (*texture)->GetNativeShaderResourceHandleForUI())
             {
-                ImGui::Image((*texture)->GetNativeShaderResourceHandleForUI(), ImVec2(72.0f, 72.0f));
+                ImGui::Image(MakeExternalTextureRef((*texture)->GetNativeShaderResourceHandleForUI()), ImVec2(72.0f, 72.0f));
             }
             ImGui::PopID();
         };
@@ -3540,16 +4046,25 @@ namespace Engine::Editor
         drawTextureSlot(MaterialTextureSlot::Metallic);
         drawTextureSlot(MaterialTextureSlot::Normal);
 
+        if (materialChangedThisFrame)
+        {
+            SyncMaterialEditorMaterialToScene(scene);
+        }
+
         ImGui::Separator();
         if (ImGui::Button("Save", ImVec2(96.0f, 0.0f)))
         {
-            SaveMaterialEditor();
+            if (SaveMaterialEditor())
+            {
+                SyncMaterialEditorMaterialToScene(scene);
+            }
         }
         ImGui::SameLine();
         if (ImGui::Button("Reload", ImVec2(96.0f, 0.0f)))
         {
             renderer.GetResourceManager().ForgetMaterial(m_materialEditorAsset);
             OpenMaterialEditor(renderer, m_materialEditorAsset);
+            SyncMaterialEditorMaterialToScene(scene);
         }
         ImGui::SameLine();
         if (m_materialEditorDirty)
@@ -3993,6 +4508,16 @@ namespace Engine::Editor
         }
     }
 
+    Renderer::GizmoAxis EditorLayer::GetHoveredGizmoAxis() const
+    {
+        return ToRendererGizmoAxis(m_hoveredGizmoAxis);
+    }
+
+    Renderer::GizmoAxis EditorLayer::GetActiveGizmoAxis() const
+    {
+        return ToRendererGizmoAxis(m_activeGizmoAxis);
+    }
+
     GizmoAxis EditorLayer::PickGizmoAxis(const Scene::Camera& camera, int mouseX, int mouseY, float width, float height) const
     {
         if (!m_selectedObject || width <= 0.0f || height <= 0.0f)
@@ -4004,9 +4529,9 @@ namespace Engine::Editor
         const Math::Vector3 origin = transform.position;
         const ImVec2 mouse = { static_cast<float>(mouseX), static_cast<float>(mouseY) };
         const ImVec2 originScreen = ProjectWorldToScreen(camera, origin, width, height);
-        constexpr float axisLength = 1.5f;
         constexpr float pickThresholdPixels = 14.0f;
         const float ringRadius = GetGizmoRadiusForCamera(camera, origin);
+        const float axisLength = ringRadius * 1.25f;
         const Math::Vector3 localAxes[] =
         {
             GetLocalAxisVector(transform, GizmoAxis::X),
@@ -4153,6 +4678,7 @@ namespace Engine::Editor
         m_gizmoDragStartTransforms.clear();
         m_gizmoRotateDragValid = false;
         m_activeGizmoAxis = GizmoAxis::None;
+        m_hoveredGizmoAxis = GizmoAxis::None;
         m_moveSnapRemainder = 0.0f;
         m_rotateSnapRemainder = 0.0f;
         m_scaleSnapRemainder = 0.0f;
@@ -4408,20 +4934,43 @@ namespace Engine::Editor
             SetSingleSelectedObject(commandPtr->GetCreatedObject());
         }
         ImGui::SameLine();
-        if (ImGui::Button("Create Cube"))
+        auto createPrimitiveObject = [&](PrimitiveShape shape)
         {
             GameObjectSnapshot snapshot;
-            snapshot.name = "Cube";
-            snapshot.meshRenderer.enabled = true;
-            snapshot.meshRenderer.mesh = renderer.GetResourceManager().CreateCubeMesh("builtin:mesh:cube");
-            snapshot.meshRenderer.material = renderer.GetResourceManager().CreateMaterial("editor:material:cube", { 1.0f, 1.0f, 1.0f, 1.0f });
-            snapshot.meshRenderer.meshPath = L"builtin:mesh:cube";
-            snapshot.meshRenderer.materialPath = L"editor:material:cube";
-            snapshot.colliders.push_back({});
+            ConfigurePrimitiveSnapshot(snapshot, renderer.GetResourceManager(), shape);
             auto command = std::make_unique<CreateGameObjectCommand>(scene, snapshot);
             CreateGameObjectCommand* commandPtr = command.get();
             m_commandManager->ExecuteCommand(std::move(command));
             SetSingleSelectedObject(commandPtr->GetCreatedObject());
+        };
+
+        if (ImGui::Button("Shapes"))
+        {
+            ImGui::OpenPopup("CreateShapeMenu");
+        }
+        if (ImGui::BeginPopup("CreateShapeMenu"))
+        {
+            if (ImGui::MenuItem("Cube"))
+            {
+                createPrimitiveObject(PrimitiveShape::Cube);
+            }
+            if (ImGui::MenuItem("Sphere"))
+            {
+                createPrimitiveObject(PrimitiveShape::Sphere);
+            }
+            if (ImGui::MenuItem("Cylinder"))
+            {
+                createPrimitiveObject(PrimitiveShape::Cylinder);
+            }
+            if (ImGui::MenuItem("Cone"))
+            {
+                createPrimitiveObject(PrimitiveShape::Cone);
+            }
+            if (ImGui::MenuItem("Plane"))
+            {
+                createPrimitiveObject(PrimitiveShape::Plane);
+            }
+            ImGui::EndPopup();
         }
         ImGui::SameLine();
         if (ImGui::Button("Create Post Process"))
@@ -4789,6 +5338,7 @@ namespace Engine::Editor
                             : "no-guid";
                         const std::string typeLabel = meta ? Asset::AssetTypeToString(meta->type) : GetAssetTypeLabel(asset);
                         const bool isTextureAsset = HasExtension(path, { L".png", L".jpg", L".jpeg", L".bmp", L".tga" });
+                        const char* assetPayloadType = GetAssetDragPayloadType(path);
                         auto handleAssetClick = [&]()
                         {
                             if (ImGui::GetIO().KeyShift)
@@ -4817,7 +5367,7 @@ namespace Engine::Editor
                             if (textureHandle)
                             {
                                 const ImVec2 imageSize(72.0f, 72.0f);
-                                ImGui::Image(textureHandle, imageSize);
+                                ImGui::Image(MakeExternalTextureRef(textureHandle), imageSize);
                                 assetItemHovered = assetItemHovered || ImGui::IsItemHovered();
                                 if (selected)
                                 {
@@ -4829,6 +5379,7 @@ namespace Engine::Editor
                                 {
                                     handleAssetClick();
                                 }
+                                EmitAssetDragDropSource(assetPayloadType, asset);
                             }
                             else
                             {
@@ -4837,6 +5388,7 @@ namespace Engine::Editor
                                     handleAssetClick();
                                 }
                                 assetItemHovered = assetItemHovered || ImGui::IsItemHovered();
+                                EmitAssetDragDropSource(assetPayloadType, asset);
                             }
 
                             std::string buttonText = typeLabel + "\n" + GetAssetFileName(asset);
@@ -4845,6 +5397,7 @@ namespace Engine::Editor
                                 handleAssetClick();
                             }
                             assetItemHovered = assetItemHovered || ImGui::IsItemHovered();
+                            EmitAssetDragDropSource(assetPayloadType, asset);
                         }
                         else
                         {
@@ -4854,6 +5407,7 @@ namespace Engine::Editor
                                 handleAssetClick();
                             }
                             assetItemHovered = ImGui::IsItemHovered();
+                            EmitAssetDragDropSource(assetPayloadType, asset);
                         }
                         if (HasExtension(path, { L".obj", L".gltf", L".glb", L".fbx" })
                             && assetItemHovered
@@ -4924,13 +5478,6 @@ namespace Engine::Editor
                         ImGui::PopStyleColor(2);
                     }
 
-                    if (HasExtension(path, { L".png", L".jpg", L".jpeg", L".bmp", L".tga" }) && ImGui::BeginDragDropSource())
-                    {
-                        ImGui::SetDragDropPayload("ASSET_TEXTURE", asset.c_str(), (asset.size() + 1) * sizeof(wchar_t));
-                        const std::string display = ToNarrowAscii(asset);
-                        ImGui::TextUnformatted(display.c_str());
-                        ImGui::EndDragDropSource();
-                    }
                     ImGui::PopID();
                 }
                 ImGui::EndTable();

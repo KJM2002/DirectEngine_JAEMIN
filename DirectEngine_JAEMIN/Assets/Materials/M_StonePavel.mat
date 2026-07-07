@@ -4,6 +4,7 @@ pixel_shader=Shaders/BasicPixel.hlsl
 base_color=0.730392,0.329393,0.329393,1
 roughness=0.196
 metallic=0.362
+normal_strength=1
 base_texture=
 roughness_texture=
 metallic_texture=

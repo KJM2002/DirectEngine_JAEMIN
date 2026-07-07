@@ -40,6 +40,9 @@
     <Filter Include="Engine\Editor\MeshEditor">
       <UniqueIdentifier>{40D0F2B4-5E00-43CF-AE6E-290C89C1C15A}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Engine\Editor\Property">
+      <UniqueIdentifier>{DF79D6EF-924B-4A7E-88C1-6CDB4DF45A39}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Engine\Graphics">
       <UniqueIdentifier>{5E91F534-A395-4430-8E78-E0D8BBC501F4}</UniqueIdentifier>
     </Filter>
@@ -141,6 +144,12 @@
     <ClCompile Include="Engine\Editor\MeshEditor\StaticMeshPreviewViewport.cpp">
       <Filter>Engine\Editor\MeshEditor</Filter>
     </ClCompile>
+    <ClCompile Include="Engine\Editor\Property\PropertyChangeCommand.cpp">
+      <Filter>Engine\Editor\Property</Filter>
+    </ClCompile>
+    <ClCompile Include="Engine\Editor\Property\PropertySystem.cpp">
+      <Filter>Engine\Editor\Property</Filter>
+    </ClCompile>
     <ClCompile Include="Engine\Editor\Command\CommandManager.cpp">
       <Filter>Engine\Editor\Command</Filter>
     </ClCompile>
@@ -216,6 +225,9 @@
     <ClCompile Include="Engine\Graphics\Renderer\DebugRenderer.cpp">
       <Filter>Engine\Graphics\Renderer</Filter>
     </ClCompile>
+    <ClCompile Include="Engine\Graphics\Renderer\GizmoRenderer.cpp">
+      <Filter>Engine\Graphics\Renderer</Filter>
+    </ClCompile>
     <ClCompile Include="Engine\Graphics\Renderer\Mesh.cpp">
       <Filter>Engine\Graphics\Renderer</Filter>
     </ClCompile>
@@ -223,6 +235,9 @@
       <Filter>Engine\Graphics\Renderer</Filter>
     </ClCompile>
     <ClCompile Include="Engine\Graphics\Renderer\Renderer.cpp">
+      <Filter>Engine\Graphics\Renderer</Filter>
+    </ClCompile>
+    <ClCompile Include="Engine\Graphics\Renderer\SelectionOutlineRenderer.cpp">
       <Filter>Engine\Graphics\Renderer</Filter>
     </ClCompile>
     <ClCompile Include="Engine\Graphics\Renderer\ShadowMap.cpp">
@@ -267,6 +282,9 @@
     <ClCompile Include="Engine\Scene\Component.cpp">
       <Filter>Engine\Scene</Filter>
     </ClCompile>
+    <ClCompile Include="Engine\Scene\ComponentRegistry.cpp">
+      <Filter>Engine\Scene</Filter>
+    </ClCompile>
     <ClCompile Include="Engine\Scene\GameObject.cpp">
       <Filter>Engine\Scene</Filter>
     </ClCompile>
@@ -286,6 +304,12 @@
       <Filter>Engine\Scene</Filter>
     </ClCompile>
     <ClCompile Include="Engine\Scene\PlayerStartComponent.cpp">
+      <Filter>Engine\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="Engine\Scene\SceneCloner.cpp">
+      <Filter>Engine\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="Engine\Scene\SceneIDs.cpp">
       <Filter>Engine\Scene</Filter>
     </ClCompile>
     <ClCompile Include="Engine\Scene\Serialization\SceneSerializer.cpp">
@@ -383,6 +407,15 @@
     </ClInclude>
     <ClInclude Include="Engine\Editor\MeshEditor\StaticMeshPreviewViewport.h">
       <Filter>Engine\Editor\MeshEditor</Filter>
+    </ClInclude>
+    <ClInclude Include="Engine\Editor\Property\PropertyChangeCommand.h">
+      <Filter>Engine\Editor\Property</Filter>
+    </ClInclude>
+    <ClInclude Include="Engine\Editor\Property\PropertySystem.h">
+      <Filter>Engine\Editor\Property</Filter>
+    </ClInclude>
+    <ClInclude Include="Engine\Editor\Property\PropertyValue.h">
+      <Filter>Engine\Editor\Property</Filter>
     </ClInclude>
     <ClInclude Include="Engine\Editor\Command\CommandManager.h">
       <Filter>Engine\Editor\Command</Filter>
@@ -492,6 +525,9 @@
     <ClInclude Include="Engine\Graphics\Renderer\DebugRenderer.h">
       <Filter>Engine\Graphics\Renderer</Filter>
     </ClInclude>
+    <ClInclude Include="Engine\Graphics\Renderer\GizmoRenderer.h">
+      <Filter>Engine\Graphics\Renderer</Filter>
+    </ClInclude>
     <ClInclude Include="Engine\Graphics\Renderer\Mesh.h">
       <Filter>Engine\Graphics\Renderer</Filter>
     </ClInclude>
@@ -499,6 +535,9 @@
       <Filter>Engine\Graphics\Renderer</Filter>
     </ClInclude>
     <ClInclude Include="Engine\Graphics\Renderer\Renderer.h">
+      <Filter>Engine\Graphics\Renderer</Filter>
+    </ClInclude>
+    <ClInclude Include="Engine\Graphics\Renderer\SelectionOutlineRenderer.h">
       <Filter>Engine\Graphics\Renderer</Filter>
     </ClInclude>
     <ClInclude Include="Engine\Graphics\Renderer\ShadowMap.h">
@@ -546,6 +585,9 @@
     <ClInclude Include="Engine\Scene\Component.h">
       <Filter>Engine\Scene</Filter>
     </ClInclude>
+    <ClInclude Include="Engine\Scene\ComponentRegistry.h">
+      <Filter>Engine\Scene</Filter>
+    </ClInclude>
     <ClInclude Include="Engine\Scene\GameObject.h">
       <Filter>Engine\Scene</Filter>
     </ClInclude>
@@ -565,6 +607,12 @@
       <Filter>Engine\Scene</Filter>
     </ClInclude>
     <ClInclude Include="Engine\Scene\PlayerStartComponent.h">
+      <Filter>Engine\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="Engine\Scene\SceneCloner.h">
+      <Filter>Engine\Scene</Filter>
+    </ClInclude>
+    <ClInclude Include="Engine\Scene\SceneIDs.h">
       <Filter>Engine\Scene</Filter>
     </ClInclude>
     <ClInclude Include="Engine\Scene\Serialization\SceneSerializer.h">
@@ -629,10 +677,25 @@
     <None Include="Shaders\DebugLineVertex.hlsl">
       <Filter>Shaders</Filter>
     </None>
+    <None Include="Shaders\GizmoPixel.hlsl">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="Shaders\GizmoVertex.hlsl">
+      <Filter>Shaders</Filter>
+    </None>
     <None Include="Shaders\PostProcessPixel.hlsl">
       <Filter>Shaders</Filter>
     </None>
     <None Include="Shaders\PostProcessVertex.hlsl">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="Shaders\SelectionOutlineMaskPixel.hlsl">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="Shaders\SelectionOutlineMaskVertex.hlsl">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="Shaders\SelectionOutlinePixel.hlsl">
       <Filter>Shaders</Filter>
     </None>
     <None Include="Shaders\ShadowDepthPixel.hlsl">

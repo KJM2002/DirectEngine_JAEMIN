@@ -16,6 +16,9 @@ namespace Engine::Scene
     class MeshRendererComponent : public Component
     {
     public:
+        static constexpr const char* StaticTypeName = "MeshRenderer";
+        const char* GetTypeName() const override { return StaticTypeName; }
+
         void SetMesh(std::shared_ptr<Renderer::Mesh> mesh);
         void SetMaterial(std::shared_ptr<Renderer::Material> material);
         void SetMeshPath(std::wstring path);

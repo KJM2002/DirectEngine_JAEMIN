@@ -30,6 +30,11 @@ namespace Engine::Renderer
         m_metallic = std::clamp(metallic, 0.0f, 1.0f);
     }
 
+    void Material::SetNormalStrength(float normalStrength)
+    {
+        m_normalStrength = std::clamp(normalStrength, 0.0f, 4.0f);
+    }
+
     void Material::SetTexture(std::shared_ptr<RHI::RHITexture> texture)
     {
         SetBaseColorTexture(std::move(texture));
@@ -95,6 +100,11 @@ namespace Engine::Renderer
         m_normalTexturePath = std::move(path);
     }
 
+    std::shared_ptr<Material> Material::Clone() const
+    {
+        return std::make_shared<Material>(*this);
+    }
+
     const std::shared_ptr<RHI::RHIShader>& Material::GetVertexShader() const
     {
         return m_vertexShader;
@@ -118,6 +128,11 @@ namespace Engine::Renderer
     float Material::GetMetallic() const
     {
         return m_metallic;
+    }
+
+    float Material::GetNormalStrength() const
+    {
+        return m_normalStrength;
     }
 
     const std::shared_ptr<RHI::RHITexture>& Material::GetTexture() const

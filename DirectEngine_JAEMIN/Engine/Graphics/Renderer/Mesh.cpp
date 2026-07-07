@@ -150,6 +150,33 @@ namespace Engine::Renderer
                 vertex.tangent[2] = tangent.z;
             }
         }
+
+        constexpr float Pi = 3.14159265358979323846f;
+
+        Vertex MakeVertex(float x, float y, float z, float nx, float ny, float nz, float u, float v, const Math::Vector4& color)
+        {
+            Vertex vertex = {};
+            vertex.position[0] = x;
+            vertex.position[1] = y;
+            vertex.position[2] = z;
+            vertex.normal[0] = nx;
+            vertex.normal[1] = ny;
+            vertex.normal[2] = nz;
+            vertex.color[0] = color.x;
+            vertex.color[1] = color.y;
+            vertex.color[2] = color.z;
+            vertex.color[3] = color.w;
+            vertex.uv[0] = u;
+            vertex.uv[1] = v;
+            return vertex;
+        }
+
+        void AddTriangle(std::vector<std::uint32_t>& indices, std::uint32_t a, std::uint32_t b, std::uint32_t c)
+        {
+            indices.push_back(a);
+            indices.push_back(b);
+            indices.push_back(c);
+        }
     }
 
     Math::Vector3 BoundingBox::GetCenter() const
@@ -222,6 +249,179 @@ namespace Engine::Renderer
             20, 21, 22, 20, 22, 23
         };
 
+        return CreateFromVertices(device, std::vector<Vertex>(std::begin(vertices), std::end(vertices)), std::vector<std::uint32_t>(std::begin(indices), std::end(indices)));
+    }
+
+    std::shared_ptr<Mesh> Mesh::CreateSphere(RHI::RHIDevice& device)
+    {
+        constexpr std::uint32_t longitudeSegments = 32;
+        constexpr std::uint32_t latitudeSegments = 16;
+        constexpr float radius = 0.5f;
+        const Math::Vector4 color = { 0.68f, 0.84f, 1.0f, 1.0f };
+
+        std::vector<Vertex> vertices;
+        std::vector<std::uint32_t> indices;
+        vertices.reserve((longitudeSegments + 1) * (latitudeSegments + 1));
+        indices.reserve(longitudeSegments * latitudeSegments * 6);
+
+        for (std::uint32_t lat = 0; lat <= latitudeSegments; ++lat)
+        {
+            const float v = static_cast<float>(lat) / static_cast<float>(latitudeSegments);
+            const float phi = v * Pi;
+            const float sinPhi = std::sin(phi);
+            const float cosPhi = std::cos(phi);
+
+            for (std::uint32_t lon = 0; lon <= longitudeSegments; ++lon)
+            {
+                const float u = static_cast<float>(lon) / static_cast<float>(longitudeSegments);
+                const float theta = u * Pi * 2.0f;
+                const float sinTheta = std::sin(theta);
+                const float cosTheta = std::cos(theta);
+                const float nx = sinPhi * cosTheta;
+                const float ny = cosPhi;
+                const float nz = sinPhi * sinTheta;
+                vertices.push_back(MakeVertex(nx * radius, ny * radius, nz * radius, nx, ny, nz, u, v, color));
+            }
+        }
+
+        for (std::uint32_t lat = 0; lat < latitudeSegments; ++lat)
+        {
+            for (std::uint32_t lon = 0; lon < longitudeSegments; ++lon)
+            {
+                const std::uint32_t a = lat * (longitudeSegments + 1) + lon;
+                const std::uint32_t b = a + longitudeSegments + 1;
+                const std::uint32_t c = b + 1;
+                const std::uint32_t d = a + 1;
+                AddTriangle(indices, a, d, b);
+                AddTriangle(indices, d, c, b);
+            }
+        }
+
+        return CreateFromVertices(device, vertices, indices);
+    }
+
+    std::shared_ptr<Mesh> Mesh::CreateCylinder(RHI::RHIDevice& device)
+    {
+        constexpr std::uint32_t segments = 32;
+        constexpr float radius = 0.5f;
+        constexpr float halfHeight = 0.5f;
+        const Math::Vector4 color = { 0.78f, 0.95f, 0.74f, 1.0f };
+
+        std::vector<Vertex> vertices;
+        std::vector<std::uint32_t> indices;
+        vertices.reserve((segments + 1) * 2 + (segments + 1) * 2 + 2);
+        indices.reserve(segments * 12);
+
+        for (std::uint32_t segment = 0; segment <= segments; ++segment)
+        {
+            const float u = static_cast<float>(segment) / static_cast<float>(segments);
+            const float theta = u * Pi * 2.0f;
+            const float cosTheta = std::cos(theta);
+            const float sinTheta = std::sin(theta);
+            vertices.push_back(MakeVertex(radius * cosTheta, halfHeight, radius * sinTheta, cosTheta, 0.0f, sinTheta, u, 0.0f, color));
+            vertices.push_back(MakeVertex(radius * cosTheta, -halfHeight, radius * sinTheta, cosTheta, 0.0f, sinTheta, u, 1.0f, color));
+        }
+
+        for (std::uint32_t segment = 0; segment < segments; ++segment)
+        {
+            const std::uint32_t top0 = segment * 2;
+            const std::uint32_t bottom0 = top0 + 1;
+            const std::uint32_t top1 = top0 + 2;
+            const std::uint32_t bottom1 = top0 + 3;
+            AddTriangle(indices, bottom0, top0, top1);
+            AddTriangle(indices, bottom0, top1, bottom1);
+        }
+
+        const std::uint32_t topCenter = static_cast<std::uint32_t>(vertices.size());
+        vertices.push_back(MakeVertex(0.0f, halfHeight, 0.0f, 0.0f, 1.0f, 0.0f, 0.5f, 0.5f, color));
+        for (std::uint32_t segment = 0; segment <= segments; ++segment)
+        {
+            const float theta = (static_cast<float>(segment) / static_cast<float>(segments)) * Pi * 2.0f;
+            const float cosTheta = std::cos(theta);
+            const float sinTheta = std::sin(theta);
+            vertices.push_back(MakeVertex(radius * cosTheta, halfHeight, radius * sinTheta, 0.0f, 1.0f, 0.0f, cosTheta * 0.5f + 0.5f, sinTheta * 0.5f + 0.5f, color));
+        }
+        for (std::uint32_t segment = 0; segment < segments; ++segment)
+        {
+            AddTriangle(indices, topCenter, topCenter + 2 + segment, topCenter + 1 + segment);
+        }
+
+        const std::uint32_t bottomCenter = static_cast<std::uint32_t>(vertices.size());
+        vertices.push_back(MakeVertex(0.0f, -halfHeight, 0.0f, 0.0f, -1.0f, 0.0f, 0.5f, 0.5f, color));
+        for (std::uint32_t segment = 0; segment <= segments; ++segment)
+        {
+            const float theta = (static_cast<float>(segment) / static_cast<float>(segments)) * Pi * 2.0f;
+            const float cosTheta = std::cos(theta);
+            const float sinTheta = std::sin(theta);
+            vertices.push_back(MakeVertex(radius * cosTheta, -halfHeight, radius * sinTheta, 0.0f, -1.0f, 0.0f, cosTheta * 0.5f + 0.5f, sinTheta * 0.5f + 0.5f, color));
+        }
+        for (std::uint32_t segment = 0; segment < segments; ++segment)
+        {
+            AddTriangle(indices, bottomCenter, bottomCenter + 1 + segment, bottomCenter + 2 + segment);
+        }
+
+        return CreateFromVertices(device, vertices, indices);
+    }
+
+    std::shared_ptr<Mesh> Mesh::CreateCone(RHI::RHIDevice& device)
+    {
+        constexpr std::uint32_t segments = 32;
+        constexpr float radius = 0.5f;
+        constexpr float halfHeight = 0.5f;
+        const Math::Vector4 color = { 1.0f, 0.78f, 0.56f, 1.0f };
+
+        std::vector<Vertex> vertices;
+        std::vector<std::uint32_t> indices;
+        vertices.reserve((segments + 1) * 2 + segments + 2);
+        indices.reserve(segments * 6);
+
+        for (std::uint32_t segment = 0; segment <= segments; ++segment)
+        {
+            const float u = static_cast<float>(segment) / static_cast<float>(segments);
+            const float theta = u * Pi * 2.0f;
+            const float cosTheta = std::cos(theta);
+            const float sinTheta = std::sin(theta);
+            const Math::Vector3 sideNormal = Normalize({ cosTheta, radius, sinTheta });
+            vertices.push_back(MakeVertex(radius * cosTheta, -halfHeight, radius * sinTheta, sideNormal.x, sideNormal.y, sideNormal.z, u, 1.0f, color));
+            vertices.push_back(MakeVertex(0.0f, halfHeight, 0.0f, sideNormal.x, sideNormal.y, sideNormal.z, u, 0.0f, color));
+        }
+
+        for (std::uint32_t segment = 0; segment < segments; ++segment)
+        {
+            const std::uint32_t base0 = segment * 2;
+            const std::uint32_t tip0 = base0 + 1;
+            const std::uint32_t base1 = base0 + 2;
+            AddTriangle(indices, base0, tip0, base1);
+        }
+
+        const std::uint32_t baseCenter = static_cast<std::uint32_t>(vertices.size());
+        vertices.push_back(MakeVertex(0.0f, -halfHeight, 0.0f, 0.0f, -1.0f, 0.0f, 0.5f, 0.5f, color));
+        for (std::uint32_t segment = 0; segment <= segments; ++segment)
+        {
+            const float theta = (static_cast<float>(segment) / static_cast<float>(segments)) * Pi * 2.0f;
+            const float cosTheta = std::cos(theta);
+            const float sinTheta = std::sin(theta);
+            vertices.push_back(MakeVertex(radius * cosTheta, -halfHeight, radius * sinTheta, 0.0f, -1.0f, 0.0f, cosTheta * 0.5f + 0.5f, sinTheta * 0.5f + 0.5f, color));
+        }
+        for (std::uint32_t segment = 0; segment < segments; ++segment)
+        {
+            AddTriangle(indices, baseCenter, baseCenter + 1 + segment, baseCenter + 2 + segment);
+        }
+
+        return CreateFromVertices(device, vertices, indices);
+    }
+
+    std::shared_ptr<Mesh> Mesh::CreatePlane(RHI::RHIDevice& device)
+    {
+        const Math::Vector4 color = { 0.86f, 0.86f, 0.86f, 1.0f };
+        const Vertex vertices[] =
+        {
+            MakeVertex(-0.5f, 0.0f, -0.5f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, color),
+            MakeVertex(-0.5f, 0.0f,  0.5f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, color),
+            MakeVertex( 0.5f, 0.0f,  0.5f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, color),
+            MakeVertex( 0.5f, 0.0f, -0.5f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, color)
+        };
+        const std::uint32_t indices[] = { 0, 1, 2, 0, 2, 3 };
         return CreateFromVertices(device, std::vector<Vertex>(std::begin(vertices), std::end(vertices)), std::vector<std::uint32_t>(std::begin(indices), std::end(indices)));
     }
 

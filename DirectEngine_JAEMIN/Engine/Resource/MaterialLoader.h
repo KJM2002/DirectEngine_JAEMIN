@@ -14,6 +14,7 @@ namespace Engine::Resource
         Math::Vector4 baseColor = { 1.0f, 1.0f, 1.0f, 1.0f };
         float roughness = 0.5f;
         float metallic = 0.0f;
+        float normalStrength = 1.0f;
         std::wstring texturePath;
         std::wstring roughnessTexturePath;
         std::wstring metallicTexturePath;

@@ -19,6 +19,7 @@ namespace Engine::Editor
 
             GameObjectSnapshot snapshot = GameObjectSnapshot::Capture(*source);
             snapshot.name = MakeUniqueName(source->GetName());
+            snapshot.ClearPersistentIDs();
             snapshot.meshRenderer.cloneMaterialOnRestore = true;
             m_snapshots.push_back(std::move(snapshot));
         }

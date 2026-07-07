@@ -47,8 +47,12 @@ namespace Engine::Renderer
     public:
         Mesh(std::shared_ptr<RHI::RHIBuffer> vertexBuffer, std::shared_ptr<RHI::RHIBuffer> indexBuffer, const std::vector<Vertex>& vertices, const std::vector<std::uint32_t>& indices, const BoundingBox& bounds);
 
-        // Creates a built-in cube mesh while keeping API-specific buffer objects behind RHI.
+        // Creates built-in primitive meshes while keeping API-specific buffer objects behind RHI.
         static std::shared_ptr<Mesh> CreateCube(RHI::RHIDevice& device);
+        static std::shared_ptr<Mesh> CreateSphere(RHI::RHIDevice& device);
+        static std::shared_ptr<Mesh> CreateCylinder(RHI::RHIDevice& device);
+        static std::shared_ptr<Mesh> CreateCone(RHI::RHIDevice& device);
+        static std::shared_ptr<Mesh> CreatePlane(RHI::RHIDevice& device);
         static std::shared_ptr<Mesh> CreateFromVertices(RHI::RHIDevice& device, const std::vector<Vertex>& vertices, const std::vector<std::uint32_t>& indices);
 
         const std::shared_ptr<RHI::RHIBuffer>& GetVertexBuffer() const;

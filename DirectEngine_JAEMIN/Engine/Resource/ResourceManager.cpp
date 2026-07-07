@@ -72,6 +72,70 @@ namespace Engine::Resource
         return mesh;
     }
 
+    std::shared_ptr<Renderer::Mesh> ResourceManager::CreateSphereMesh(const std::string& key)
+    {
+        if (auto it = m_meshes.find(key); it != m_meshes.end())
+        {
+            return it->second;
+        }
+
+        std::shared_ptr<Renderer::Mesh> mesh = Renderer::Mesh::CreateSphere(m_device);
+        if (mesh)
+        {
+            m_meshes.emplace(key, mesh);
+        }
+
+        return mesh;
+    }
+
+    std::shared_ptr<Renderer::Mesh> ResourceManager::CreateCylinderMesh(const std::string& key)
+    {
+        if (auto it = m_meshes.find(key); it != m_meshes.end())
+        {
+            return it->second;
+        }
+
+        std::shared_ptr<Renderer::Mesh> mesh = Renderer::Mesh::CreateCylinder(m_device);
+        if (mesh)
+        {
+            m_meshes.emplace(key, mesh);
+        }
+
+        return mesh;
+    }
+
+    std::shared_ptr<Renderer::Mesh> ResourceManager::CreateConeMesh(const std::string& key)
+    {
+        if (auto it = m_meshes.find(key); it != m_meshes.end())
+        {
+            return it->second;
+        }
+
+        std::shared_ptr<Renderer::Mesh> mesh = Renderer::Mesh::CreateCone(m_device);
+        if (mesh)
+        {
+            m_meshes.emplace(key, mesh);
+        }
+
+        return mesh;
+    }
+
+    std::shared_ptr<Renderer::Mesh> ResourceManager::CreatePlaneMesh(const std::string& key)
+    {
+        if (auto it = m_meshes.find(key); it != m_meshes.end())
+        {
+            return it->second;
+        }
+
+        std::shared_ptr<Renderer::Mesh> mesh = Renderer::Mesh::CreatePlane(m_device);
+        if (mesh)
+        {
+            m_meshes.emplace(key, mesh);
+        }
+
+        return mesh;
+    }
+
     std::shared_ptr<Renderer::Mesh> ResourceManager::LoadOBJMesh(const std::string& key, const std::string& path)
     {
         if (auto it = m_meshes.find(key); it != m_meshes.end())
@@ -96,6 +160,27 @@ namespace Engine::Resource
 
     std::shared_ptr<Renderer::Mesh> ResourceManager::LoadMesh(const std::wstring& path)
     {
+        if (path == L"builtin:mesh:cube")
+        {
+            return CreateCubeMesh();
+        }
+        if (path == L"builtin:mesh:sphere")
+        {
+            return CreateSphereMesh();
+        }
+        if (path == L"builtin:mesh:cylinder")
+        {
+            return CreateCylinderMesh();
+        }
+        if (path == L"builtin:mesh:cone")
+        {
+            return CreateConeMesh();
+        }
+        if (path == L"builtin:mesh:plane")
+        {
+            return CreatePlaneMesh();
+        }
+
         if (auto it = m_meshFiles.find(path); it != m_meshFiles.end())
         {
             return it->second;
@@ -279,6 +364,7 @@ namespace Engine::Resource
         material->SetBaseColor(baseColor);
         material->SetRoughness(0.5f);
         material->SetMetallic(0.0f);
+        material->SetNormalStrength(1.0f);
         material->SetVertexShaderPath(L"Shaders/BasicVertex.hlsl");
         material->SetPixelShaderPath(L"Shaders/BasicPixel.hlsl");
         m_materials.emplace(key, material);
@@ -313,6 +399,7 @@ namespace Engine::Resource
         material->SetBaseColor(desc.baseColor);
         material->SetRoughness(desc.roughness);
         material->SetMetallic(desc.metallic);
+        material->SetNormalStrength(desc.normalStrength);
         material->SetVertexShaderPath(desc.vertexShaderPath);
         material->SetPixelShaderPath(desc.pixelShaderPath);
         if (!desc.texturePath.empty())

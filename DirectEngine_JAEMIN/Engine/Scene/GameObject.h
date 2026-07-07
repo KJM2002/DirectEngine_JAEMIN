@@ -2,6 +2,7 @@
 
 #include "Component.h"
 #include "Engine/Math/Transform.h"
+#include "SceneIDs.h"
 
 #include <memory>
 #include <string>
@@ -21,10 +22,18 @@ namespace Engine::Scene
         GameObject(const GameObject&) = delete;
         GameObject& operator=(const GameObject&) = delete;
 
+        ObjectID GetID() const;
+        void SetID(ObjectID id);
         const std::string& GetName() const;
         void SetName(std::string name);
         const std::string& GetOutlinerFolder() const;
         void SetOutlinerFolder(std::string folder);
+        ObjectID GetParentID() const;
+        void SetParentID(ObjectID id);
+        const std::vector<ObjectID>& GetChildren() const;
+        void AddChildID(ObjectID id);
+        void RemoveChildID(ObjectID id);
+        void ClearChildren();
         Math::Transform& GetTransform();
         const Math::Transform& GetTransform() const;
 
@@ -39,6 +48,9 @@ namespace Engine::Scene
             m_components.push_back(std::move(component));
             return result;
         }
+
+        Component& AddComponent(std::shared_ptr<Component> component);
+        Component* GetComponentByID(ComponentID id) const;
 
         template <typename T>
         T* GetComponent() const
@@ -89,9 +101,12 @@ namespace Engine::Scene
         void Update(float deltaTime);
 
     private:
+        ObjectID m_id = InvalidObjectID;
         std::string m_name;
         std::string m_outlinerFolder;
         Math::Transform m_transform;
+        ObjectID m_parentId = InvalidObjectID;
+        std::vector<ObjectID> m_children;
         std::vector<std::shared_ptr<Component>> m_components;
     };
 }

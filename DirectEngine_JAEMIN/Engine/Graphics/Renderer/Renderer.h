@@ -34,6 +34,8 @@ namespace Engine::Renderer
     class Material;
     class Mesh;
     class DebugRenderer;
+    class GizmoRenderer;
+    class SelectionOutlineRenderer;
     class ShadowMap;
 
     enum class GizmoVisualMode
@@ -41,6 +43,14 @@ namespace Engine::Renderer
         Move,
         Rotate,
         Scale
+    };
+
+    enum class GizmoAxis
+    {
+        None,
+        X,
+        Y,
+        Z
     };
 
     struct RenderLight
@@ -53,6 +63,15 @@ namespace Engine::Renderer
         float intensity = 1.0f;
         Math::Vector3 spotAngles = { 1.0f, 0.0f, 0.0f };
         float padding = 0.0f;
+    };
+
+    struct SelectionOutlineSettings
+    {
+        bool enabled = true;
+        bool debugLineEnabled = false;
+        Math::Vector4 color = { 1.0f, 0.78f, 0.08f, 1.0f };
+        float width = 4.0f;
+        float opacity = 1.0f;
     };
 
     struct RenderItem
@@ -82,7 +101,7 @@ namespace Engine::Renderer
         bool Initialize(RHI::GraphicsAPI api, void* nativeWindowHandle, std::uint32_t width, std::uint32_t height);
         void Shutdown();
         void Update(float deltaTime);
-        void BeginFrame(float red, float green, float blue, float alpha);
+        void BeginFrame(float red, float green, float blue, float alpha, bool selectionOutlineCandidate = false);
         void EndFrame();
         void Resize(std::uint32_t width, std::uint32_t height);
         void SetActiveCamera(const Scene::Camera* camera);
@@ -99,11 +118,13 @@ namespace Engine::Renderer
         void Render(const Scene::GameObject& object);
         void RenderColliders(const Scene::Scene& scene, const Scene::GameObject* selectedObject, bool enabled);
         void RenderSelectionOutlines(const std::vector<Scene::GameObject*>& selectedObjects);
-        void RenderSelectionGizmo(const Scene::GameObject* selectedObject, bool enabled, GizmoVisualMode mode);
+        void RenderSelectionGizmo(const Scene::GameObject* selectedObject, bool enabled, GizmoVisualMode mode, GizmoAxis hoveredAxis = GizmoAxis::None, GizmoAxis activeAxis = GizmoAxis::None);
         void* RenderStaticMeshPreview(const Mesh& mesh, std::uint32_t width, std::uint32_t height, const Math::Matrix4x4& view, const Math::Matrix4x4& projection);
         void ApplyPostProcess();
         void SetPostProcessSettings(const PostProcessSettings& settings);
         PostProcessSettings GetPostProcessSettings() const;
+        void SetSelectionOutlineSettings(const SelectionOutlineSettings& settings);
+        SelectionOutlineSettings GetSelectionOutlineSettings() const;
         std::uint32_t GetDrawCallCount() const;
         std::uint32_t GetTriangleCount() const;
         void* GetNativeDeviceHandleForDebugUI() const;
@@ -112,11 +133,14 @@ namespace Engine::Renderer
     private:
         bool CreateRenderResources();
         void DrawMeshWithMatrices(const Mesh& mesh, const Material& material, const Math::Transform& transform, const Math::Matrix4x4& view, const Math::Matrix4x4& projection);
+        void RenderDebugSelectionOutlines(const std::vector<Scene::GameObject*>& selectedObjects);
 
         std::unique_ptr<RHI::RHIDevice> m_device;
         std::unique_ptr<RHI::RHISwapChain> m_swapChain;
         std::unique_ptr<Resource::ResourceManager> m_resourceManager;
         std::unique_ptr<DebugRenderer> m_debugRenderer;
+        std::unique_ptr<GizmoRenderer> m_gizmoRenderer;
+        std::unique_ptr<SelectionOutlineRenderer> m_selectionOutlineRenderer;
         std::unique_ptr<PostProcessStack> m_postProcessStack;
         std::unique_ptr<ShadowMap> m_shadowMap;
         std::shared_ptr<Material> m_defaultMaterial;
@@ -133,6 +157,7 @@ namespace Engine::Renderer
         std::vector<RenderLight> m_lights;
         Math::Vector3 m_ambientColor = { 0.18f, 0.20f, 0.24f };
         RenderQueue m_renderQueue;
+        SelectionOutlineSettings m_selectionOutlineSettings;
         std::uint32_t m_drawCallCount = 0;
         std::uint32_t m_triangleCount = 0;
         std::uint32_t m_width = 0;
@@ -141,5 +166,7 @@ namespace Engine::Renderer
         std::uint32_t m_previewHeight = 0;
         bool m_enableShadows = false;
         bool m_enablePostProcess = false;
+        bool m_frameUsesSceneColorTarget = false;
+        bool m_selectionOutlineMaskReady = false;
     };
 }

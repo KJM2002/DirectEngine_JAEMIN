@@ -42,6 +42,10 @@ namespace Engine::Resource
         void SetAssetDatabase(const Asset::AssetDatabase* assetDatabase);
 
         std::shared_ptr<Renderer::Mesh> CreateCubeMesh(const std::string& key = "builtin:mesh:cube");
+        std::shared_ptr<Renderer::Mesh> CreateSphereMesh(const std::string& key = "builtin:mesh:sphere");
+        std::shared_ptr<Renderer::Mesh> CreateCylinderMesh(const std::string& key = "builtin:mesh:cylinder");
+        std::shared_ptr<Renderer::Mesh> CreateConeMesh(const std::string& key = "builtin:mesh:cone");
+        std::shared_ptr<Renderer::Mesh> CreatePlaneMesh(const std::string& key = "builtin:mesh:plane");
         std::shared_ptr<Renderer::Mesh> LoadOBJMesh(const std::string& key, const std::string& path);
         std::shared_ptr<Renderer::Mesh> LoadMesh(const std::wstring& path);
         std::shared_ptr<Renderer::Mesh> LoadMeshByGuid(const std::string& guid);

@@ -164,6 +164,8 @@
     <ClCompile Include="Engine\Editor\MeshEditor\PreviewCamera.cpp" />
     <ClCompile Include="Engine\Editor\MeshEditor\StaticMeshEditor.cpp" />
     <ClCompile Include="Engine\Editor\MeshEditor\StaticMeshPreviewViewport.cpp" />
+    <ClCompile Include="Engine\Editor\Property\PropertyChangeCommand.cpp" />
+    <ClCompile Include="Engine\Editor\Property\PropertySystem.cpp" />
     <ClCompile Include="Engine\Graphics\D3D11\D3D11Buffer.cpp" />
     <ClCompile Include="Engine\Graphics\D3D11\D3D11Context.cpp" />
     <ClCompile Include="Engine\Graphics\D3D11\D3D11Device.cpp" />
@@ -180,9 +182,11 @@
     <ClCompile Include="Engine\Graphics\RHI\RHIFactory.cpp" />
     <ClCompile Include="Engine\Graphics\Renderer\Material.cpp" />
     <ClCompile Include="Engine\Graphics\Renderer\DebugRenderer.cpp" />
+    <ClCompile Include="Engine\Graphics\Renderer\GizmoRenderer.cpp" />
     <ClCompile Include="Engine\Graphics\Renderer\Mesh.cpp" />
     <ClCompile Include="Engine\Graphics\Renderer\PostProcess.cpp" />
     <ClCompile Include="Engine\Graphics\Renderer\Renderer.cpp" />
+    <ClCompile Include="Engine\Graphics\Renderer\SelectionOutlineRenderer.cpp" />
     <ClCompile Include="Engine\Graphics\Renderer\ShadowMap.cpp" />
     <ClCompile Include="Engine\Core\Application.cpp" />
     <ClCompile Include="Engine\Core\Log.cpp" />
@@ -197,6 +201,7 @@
     <ClCompile Include="Engine\Resource\ResourceManager.cpp" />
     <ClCompile Include="Engine\Scene\Camera.cpp" />
     <ClCompile Include="Engine\Scene\Component.cpp" />
+    <ClCompile Include="Engine\Scene\ComponentRegistry.cpp" />
     <ClCompile Include="Engine\Scene\GameObject.cpp" />
     <ClCompile Include="Engine\Scene\Light.cpp" />
     <ClCompile Include="Engine\Scene\LightComponent.cpp" />
@@ -204,6 +209,8 @@
     <ClCompile Include="Engine\Scene\MeshRendererComponent.cpp" />
     <ClCompile Include="Engine\Scene\PlayerStartComponent.cpp" />
     <ClCompile Include="Engine\Scene\PostProcessComponent.cpp" />
+    <ClCompile Include="Engine\Scene\SceneCloner.cpp" />
+    <ClCompile Include="Engine\Scene\SceneIDs.cpp" />
     <ClCompile Include="Engine\Scene\Serialization\SceneSerializer.cpp" />
     <ClCompile Include="Engine\Scene\Scene.cpp" />
     <ClCompile Include="Game\GameApp.cpp" />
@@ -248,6 +255,9 @@
     <ClInclude Include="Engine\Editor\MeshEditor\PreviewCamera.h" />
     <ClInclude Include="Engine\Editor\MeshEditor\StaticMeshEditor.h" />
     <ClInclude Include="Engine\Editor\MeshEditor\StaticMeshPreviewViewport.h" />
+    <ClInclude Include="Engine\Editor\Property\PropertyChangeCommand.h" />
+    <ClInclude Include="Engine\Editor\Property\PropertySystem.h" />
+    <ClInclude Include="Engine\Editor\Property\PropertyValue.h" />
     <ClInclude Include="Engine\Graphics\D3D11\D3D11Buffer.h" />
     <ClInclude Include="Engine\Graphics\D3D11\D3D11Common.h" />
     <ClInclude Include="Engine\Graphics\D3D11\D3D11Context.h" />
@@ -274,9 +284,11 @@
     <ClInclude Include="Engine\Graphics\RHI\RHITexture.h" />
     <ClInclude Include="Engine\Graphics\Renderer\Material.h" />
     <ClInclude Include="Engine\Graphics\Renderer\DebugRenderer.h" />
+    <ClInclude Include="Engine\Graphics\Renderer\GizmoRenderer.h" />
     <ClInclude Include="Engine\Graphics\Renderer\Mesh.h" />
     <ClInclude Include="Engine\Graphics\Renderer\PostProcess.h" />
     <ClInclude Include="Engine\Graphics\Renderer\Renderer.h" />
+    <ClInclude Include="Engine\Graphics\Renderer\SelectionOutlineRenderer.h" />
     <ClInclude Include="Engine\Graphics\Renderer\ShadowMap.h" />
     <ClInclude Include="Engine\Input\Input.h" />
     <ClInclude Include="Engine\Math\MathTypes.h" />
@@ -292,6 +304,7 @@
     <ClInclude Include="Engine\Resource\ResourceManager.h" />
     <ClInclude Include="Engine\Scene\Camera.h" />
     <ClInclude Include="Engine\Scene\Component.h" />
+    <ClInclude Include="Engine\Scene\ComponentRegistry.h" />
     <ClInclude Include="Engine\Scene\GameObject.h" />
     <ClInclude Include="Engine\Scene\Light.h" />
     <ClInclude Include="Engine\Scene\LightComponent.h" />
@@ -299,6 +312,8 @@
     <ClInclude Include="Engine\Scene\MeshRendererComponent.h" />
     <ClInclude Include="Engine\Scene\PlayerStartComponent.h" />
     <ClInclude Include="Engine\Scene\PostProcessComponent.h" />
+    <ClInclude Include="Engine\Scene\SceneCloner.h" />
+    <ClInclude Include="Engine\Scene\SceneIDs.h" />
     <ClInclude Include="Engine\Scene\Serialization\SceneSerializer.h" />
     <ClInclude Include="Engine\Scene\Scene.h" />
     <ClInclude Include="Game\GameApp.h" />
@@ -321,8 +336,13 @@
     <None Include="Shaders\BasicVertex.hlsl" />
     <None Include="Shaders\DebugLinePixel.hlsl" />
     <None Include="Shaders\DebugLineVertex.hlsl" />
+    <None Include="Shaders\GizmoPixel.hlsl" />
+    <None Include="Shaders\GizmoVertex.hlsl" />
     <None Include="Shaders\PostProcessPixel.hlsl" />
     <None Include="Shaders\PostProcessVertex.hlsl" />
+    <None Include="Shaders\SelectionOutlineMaskPixel.hlsl" />
+    <None Include="Shaders\SelectionOutlineMaskVertex.hlsl" />
+    <None Include="Shaders\SelectionOutlinePixel.hlsl" />
     <None Include="Shaders\ShadowDepthPixel.hlsl" />
     <None Include="Shaders\ShadowDepthVertex.hlsl" />
   </ItemGroup>

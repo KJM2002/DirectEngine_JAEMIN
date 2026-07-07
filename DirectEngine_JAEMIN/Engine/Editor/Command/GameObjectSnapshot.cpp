@@ -20,6 +20,7 @@ namespace Engine::Editor
             clone->SetBaseColor(source.GetBaseColor());
             clone->SetRoughness(source.GetRoughness());
             clone->SetMetallic(source.GetMetallic());
+            clone->SetNormalStrength(source.GetNormalStrength());
             clone->SetBaseColorTexture(source.GetBaseColorTexture());
             clone->SetRoughnessTexture(source.GetRoughnessTexture());
             clone->SetMetallicTexture(source.GetMetallicTexture());
@@ -64,6 +65,7 @@ namespace Engine::Editor
             material->SetBaseColor(snapshot.materialBaseColor);
             material->SetRoughness(snapshot.materialRoughness);
             material->SetMetallic(snapshot.materialMetallic);
+            material->SetNormalStrength(snapshot.materialNormalStrength);
             material->SetBaseColorTexture(snapshot.baseColorTexture);
             material->SetRoughnessTexture(snapshot.roughnessTexture);
             material->SetMetallicTexture(snapshot.metallicTexture);
@@ -78,12 +80,16 @@ namespace Engine::Editor
     GameObjectSnapshot GameObjectSnapshot::Capture(const Scene::GameObject& object)
     {
         GameObjectSnapshot snapshot;
+        snapshot.id = object.GetID();
+        snapshot.parentId = object.GetParentID();
+        snapshot.children = object.GetChildren();
         snapshot.name = object.GetName();
         snapshot.outlinerFolder = object.GetOutlinerFolder();
         snapshot.transform = object.GetTransform();
 
         if (const Scene::MeshRendererComponent* meshRenderer = object.GetComponent<Scene::MeshRendererComponent>())
         {
+            snapshot.meshRenderer.componentId = meshRenderer->GetID();
             snapshot.meshRenderer.enabled = true;
             snapshot.meshRenderer.mesh = meshRenderer->GetMesh();
             snapshot.meshRenderer.material = meshRenderer->GetMaterial();
@@ -97,6 +103,7 @@ namespace Engine::Editor
                 snapshot.meshRenderer.materialBaseColor = material->GetBaseColor();
                 snapshot.meshRenderer.materialRoughness = material->GetRoughness();
                 snapshot.meshRenderer.materialMetallic = material->GetMetallic();
+                snapshot.meshRenderer.materialNormalStrength = material->GetNormalStrength();
                 snapshot.meshRenderer.baseColorTexture = material->GetBaseColorTexture();
                 snapshot.meshRenderer.roughnessTexture = material->GetRoughnessTexture();
                 snapshot.meshRenderer.metallicTexture = material->GetMetallicTexture();
@@ -116,6 +123,7 @@ namespace Engine::Editor
             }
 
             ColliderSnapshot colliderSnapshot;
+            colliderSnapshot.componentId = collider->GetID();
             colliderSnapshot.type = collider->type;
             colliderSnapshot.center = collider->center;
             colliderSnapshot.rotation = collider->rotation;
@@ -127,6 +135,7 @@ namespace Engine::Editor
 
         if (const Scene::LightComponent* light = object.GetComponent<Scene::LightComponent>())
         {
+            snapshot.light.componentId = light->GetID();
             snapshot.light.enabled = true;
             snapshot.light.type = light->type;
             snapshot.light.color = light->color;
@@ -140,6 +149,7 @@ namespace Engine::Editor
 
         if (const Scene::PostProcessComponent* postProcess = object.GetComponent<Scene::PostProcessComponent>())
         {
+            snapshot.postProcess.componentId = postProcess->GetID();
             snapshot.postProcess.enabledComponent = true;
             snapshot.postProcess.enabled = postProcess->enabled;
             snapshot.postProcess.effect = postProcess->effect;
@@ -160,6 +170,7 @@ namespace Engine::Editor
 
         if (const Scene::PlayerStartComponent* playerStart = object.GetComponent<Scene::PlayerStartComponent>())
         {
+            snapshot.playerStart.componentId = playerStart->GetID();
             snapshot.playerStart.enabled = true;
             snapshot.playerStart.playerHeight = playerStart->playerHeight;
             snapshot.playerStart.moveSpeed = playerStart->moveSpeed;
@@ -172,14 +183,16 @@ namespace Engine::Editor
 
     bool GameObjectSnapshot::IsDifferent(const GameObjectSnapshot& a, const GameObjectSnapshot& b, float epsilon)
     {
-        if (a.name != b.name || a.outlinerFolder != b.outlinerFolder || Different(a.transform, b.transform, epsilon))
+        if (a.id != b.id || a.parentId != b.parentId || a.children != b.children
+            || a.name != b.name || a.outlinerFolder != b.outlinerFolder || Different(a.transform, b.transform, epsilon))
         {
             return true;
         }
 
         const MeshRendererSnapshot& am = a.meshRenderer;
         const MeshRendererSnapshot& bm = b.meshRenderer;
-        if (am.enabled != bm.enabled
+        if (am.componentId != bm.componentId
+            || am.enabled != bm.enabled
             || am.mesh != bm.mesh
             || am.material != bm.material
             || am.meshPath != bm.meshPath
@@ -190,6 +203,7 @@ namespace Engine::Editor
             || Different(am.materialBaseColor, bm.materialBaseColor, epsilon)
             || Different(am.materialRoughness, bm.materialRoughness, epsilon)
             || Different(am.materialMetallic, bm.materialMetallic, epsilon)
+            || Different(am.materialNormalStrength, bm.materialNormalStrength, epsilon)
             || am.baseColorTexture != bm.baseColorTexture
             || am.roughnessTexture != bm.roughnessTexture
             || am.metallicTexture != bm.metallicTexture
@@ -210,7 +224,7 @@ namespace Engine::Editor
         {
             const ColliderSnapshot& ac = a.colliders[i];
             const ColliderSnapshot& bc = b.colliders[i];
-            if (ac.type != bc.type || Different(ac.center, bc.center, epsilon) || Different(ac.rotation, bc.rotation, epsilon) || Different(ac.size, bc.size, epsilon)
+            if (ac.componentId != bc.componentId || ac.type != bc.type || Different(ac.center, bc.center, epsilon) || Different(ac.rotation, bc.rotation, epsilon) || Different(ac.size, bc.size, epsilon)
                 || Different(ac.radius, bc.radius, epsilon) || ac.isTrigger != bc.isTrigger)
             {
                 return true;
@@ -219,7 +233,7 @@ namespace Engine::Editor
 
         const LightSnapshot& al = a.light;
         const LightSnapshot& bl = b.light;
-        if (al.enabled != bl.enabled || al.type != bl.type || Different(al.color, bl.color, epsilon)
+        if (al.componentId != bl.componentId || al.enabled != bl.enabled || al.type != bl.type || Different(al.color, bl.color, epsilon)
             || Different(al.intensity, bl.intensity, epsilon) || Different(al.range, bl.range, epsilon)
             || Different(al.direction, bl.direction, epsilon) || Different(al.innerConeAngle, bl.innerConeAngle, epsilon)
             || Different(al.outerConeAngle, bl.outerConeAngle, epsilon) || Different(al.ambientColor, bl.ambientColor, epsilon))
@@ -229,7 +243,7 @@ namespace Engine::Editor
 
         const PostProcessSnapshot& ap = a.postProcess;
         const PostProcessSnapshot& bp = b.postProcess;
-        if (ap.enabledComponent != bp.enabledComponent || ap.enabled != bp.enabled || ap.effect != bp.effect
+        if (ap.componentId != bp.componentId || ap.enabledComponent != bp.enabledComponent || ap.enabled != bp.enabled || ap.effect != bp.effect
             || ap.grayscaleEnabled != bp.grayscaleEnabled || ap.vignetteEnabled != bp.vignetteEnabled
             || ap.toneMappingEnabled != bp.toneMappingEnabled || ap.colorAdjustEnabled != bp.colorAdjustEnabled
             || Different(ap.grayscaleIntensity, bp.grayscaleIntensity, epsilon) || Different(ap.exposure, bp.exposure, epsilon)
@@ -243,15 +257,41 @@ namespace Engine::Editor
 
         const PlayerStartSnapshot& aps = a.playerStart;
         const PlayerStartSnapshot& bps = b.playerStart;
-        return aps.enabled != bps.enabled
+        return aps.componentId != bps.componentId
+            || aps.enabled != bps.enabled
             || Different(aps.playerHeight, bps.playerHeight, epsilon)
             || Different(aps.moveSpeed, bps.moveSpeed, epsilon)
             || Different(aps.fastMoveMultiplier, bps.fastMoveMultiplier, epsilon)
             || Different(aps.mouseSensitivity, bps.mouseSensitivity, epsilon);
     }
 
+    void GameObjectSnapshot::ClearPersistentIDs()
+    {
+        id = Scene::InvalidObjectID;
+        parentId = Scene::InvalidObjectID;
+        children.clear();
+        meshRenderer.componentId = Scene::InvalidComponentID;
+        for (ColliderSnapshot& collider : colliders)
+        {
+            collider.componentId = Scene::InvalidComponentID;
+        }
+        light.componentId = Scene::InvalidComponentID;
+        postProcess.componentId = Scene::InvalidComponentID;
+        playerStart.componentId = Scene::InvalidComponentID;
+    }
+
     void GameObjectSnapshot::ApplyTo(Scene::GameObject& object) const
     {
+        if (id != Scene::InvalidObjectID)
+        {
+            object.SetID(id);
+        }
+        object.SetParentID(parentId);
+        object.ClearChildren();
+        for (Scene::ObjectID child : children)
+        {
+            object.AddChildID(child);
+        }
         object.SetName(name);
         object.SetOutlinerFolder(outlinerFolder);
         object.GetTransform() = transform;
@@ -260,6 +300,10 @@ namespace Engine::Editor
         if (meshRenderer.enabled)
         {
             Scene::MeshRendererComponent& component = object.AddComponent<Scene::MeshRendererComponent>();
+            if (meshRenderer.componentId != Scene::InvalidComponentID)
+            {
+                component.SetID(meshRenderer.componentId);
+            }
             component.SetMesh(meshRenderer.mesh);
             component.SetMaterial(meshRenderer.cloneMaterialOnRestore && meshRenderer.material
                 ? CloneMaterialInstance(*meshRenderer.material)
@@ -275,6 +319,10 @@ namespace Engine::Editor
         for (const ColliderSnapshot& colliderSnapshot : colliders)
         {
             Physics::ColliderComponent& collider = object.AddComponent<Physics::ColliderComponent>();
+            if (colliderSnapshot.componentId != Scene::InvalidComponentID)
+            {
+                collider.SetID(colliderSnapshot.componentId);
+            }
             collider.type = colliderSnapshot.type;
             collider.center = colliderSnapshot.center;
             collider.rotation = colliderSnapshot.rotation;
@@ -287,6 +335,10 @@ namespace Engine::Editor
         if (light.enabled)
         {
             Scene::LightComponent& component = object.AddComponent<Scene::LightComponent>();
+            if (light.componentId != Scene::InvalidComponentID)
+            {
+                component.SetID(light.componentId);
+            }
             component.type = light.type;
             component.color = light.color;
             component.intensity = light.intensity;
@@ -301,6 +353,10 @@ namespace Engine::Editor
         if (postProcess.enabledComponent)
         {
             Scene::PostProcessComponent& component = object.AddComponent<Scene::PostProcessComponent>();
+            if (postProcess.componentId != Scene::InvalidComponentID)
+            {
+                component.SetID(postProcess.componentId);
+            }
             component.enabled = postProcess.enabled;
             component.effect = postProcess.effect;
             component.grayscaleEnabled = postProcess.grayscaleEnabled;
@@ -322,6 +378,10 @@ namespace Engine::Editor
         if (playerStart.enabled)
         {
             Scene::PlayerStartComponent& component = object.AddComponent<Scene::PlayerStartComponent>();
+            if (playerStart.componentId != Scene::InvalidComponentID)
+            {
+                component.SetID(playerStart.componentId);
+            }
             component.playerHeight = playerStart.playerHeight;
             component.moveSpeed = playerStart.moveSpeed;
             component.fastMoveMultiplier = playerStart.fastMoveMultiplier;
@@ -331,7 +391,9 @@ namespace Engine::Editor
 
     Scene::GameObject& GameObjectSnapshot::Restore(Scene::Scene& scene) const
     {
-        Scene::GameObject& object = scene.CreateGameObject(name);
+        Scene::GameObject& object = id == Scene::InvalidObjectID
+            ? scene.CreateGameObject(name)
+            : scene.CreateGameObject(name, id);
         ApplyTo(object);
         return object;
     }

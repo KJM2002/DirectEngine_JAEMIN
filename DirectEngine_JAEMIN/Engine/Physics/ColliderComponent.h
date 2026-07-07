@@ -14,6 +14,9 @@ namespace Engine::Physics
     class ColliderComponent : public Scene::Component
     {
     public:
+        static constexpr const char* StaticTypeName = "Collider";
+        const char* GetTypeName() const override { return StaticTypeName; }
+
         ColliderType type = ColliderType::AABB;
         Math::Vector3 center = { 0.0f, 0.0f, 0.0f };
         Math::Vector3 rotation = { 0.0f, 0.0f, 0.0f };

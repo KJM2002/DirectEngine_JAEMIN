@@ -18,7 +18,7 @@ cbuffer MaterialBuffer : register(b1)
     int UseNormalTexture;
     float Roughness;
     float Metallic;
-    float MaterialPadding0;
+    float NormalStrength;
     float MaterialPadding1;
     float3 CameraPosition;
     float MaterialPadding2;
@@ -115,6 +115,7 @@ float3 ResolveNormal(PSInput input)
 
     float3 bitangent = normalize(cross(normal, tangent));
     float3 tangentNormal = NormalTexture.Sample(NormalSampler, input.uv).xyz * 2.0f - 1.0f;
+    tangentNormal.xy *= NormalStrength;
     tangentNormal = normalize(tangentNormal);
     return normalize(tangentNormal.x * tangent + tangentNormal.y * bitangent + tangentNormal.z * normal);
 }

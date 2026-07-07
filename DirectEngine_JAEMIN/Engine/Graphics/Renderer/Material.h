@@ -17,6 +17,7 @@ namespace Engine::Renderer
         void SetBaseColor(const Math::Vector4& color);
         void SetRoughness(float roughness);
         void SetMetallic(float metallic);
+        void SetNormalStrength(float normalStrength);
         void SetTexture(std::shared_ptr<RHI::RHITexture> texture);
         void SetBaseColorTexture(std::shared_ptr<RHI::RHITexture> texture);
         void SetRoughnessTexture(std::shared_ptr<RHI::RHITexture> texture);
@@ -30,12 +31,14 @@ namespace Engine::Renderer
         void SetRoughnessTexturePath(std::wstring path);
         void SetMetallicTexturePath(std::wstring path);
         void SetNormalTexturePath(std::wstring path);
+        std::shared_ptr<Material> Clone() const;
 
         const std::shared_ptr<RHI::RHIShader>& GetVertexShader() const;
         const std::shared_ptr<RHI::RHIShader>& GetPixelShader() const;
         const Math::Vector4& GetBaseColor() const;
         float GetRoughness() const;
         float GetMetallic() const;
+        float GetNormalStrength() const;
         const std::shared_ptr<RHI::RHITexture>& GetTexture() const;
         const std::shared_ptr<RHI::RHITexture>& GetBaseColorTexture() const;
         const std::shared_ptr<RHI::RHITexture>& GetRoughnessTexture() const;
@@ -67,5 +70,6 @@ namespace Engine::Renderer
         Math::Vector4 m_baseColor = { 1.0f, 1.0f, 1.0f, 1.0f };
         float m_roughness = 0.5f;
         float m_metallic = 0.0f;
+        float m_normalStrength = 1.0f;
     };
 }
